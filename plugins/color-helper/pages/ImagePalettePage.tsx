@@ -800,7 +800,13 @@ interface ImagePaletteState {
   paletteColors: string[] | null;
 }
 
-class ImagePalettePage extends Component<{ onColorClick: (e: any) => void; showMessage?: (msg: string) => void }, ImagePaletteState> {
+interface ImagePaletteProps {
+  onColorClick: (e: any) => void;
+  showMessage?: (msg: string) => void;
+  initialImage?: string | null;
+}
+
+class ImagePalettePage extends Component<ImagePaletteProps, ImagePaletteState> {
   private fileInputRef = createRef<HTMLInputElement>();
 
   state: ImagePaletteState = {
@@ -808,6 +814,18 @@ class ImagePalettePage extends Component<{ onColorClick: (e: any) => void; showM
     primaryColor: null,
     paletteColors: null,
   };
+
+  componentDidMount() {
+    if (this.props.initialImage) {
+      this.setState({ imageUrl: this.props.initialImage, primaryColor: null, paletteColors: null });
+    }
+  }
+
+  componentDidUpdate(prevProps: ImagePaletteProps) {
+    if (this.props.initialImage && this.props.initialImage !== prevProps.initialImage) {
+      this.setState({ imageUrl: this.props.initialImage, primaryColor: null, paletteColors: null });
+    }
+  }
 
   handleImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     try {

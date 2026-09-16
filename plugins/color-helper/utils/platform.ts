@@ -5,18 +5,22 @@
  * - 解耦业务代码与平台 API
  */
 
-// 平台实例
-const platform = window.platform;
+// 动态获取平台实例 (兼容 window.platform、window.ztools、window.utools)
+export function getPlatform(): any {
+  if (typeof window === 'undefined') return null;
+  return window.platform || (window as any).ztools || (window as any).utools || null;
+}
 
 //  localStorage key 前缀 
 const STORAGE_PREFIX = 'color_helper_';
 
 // 环境检测
-export const isPlatform = !!platform;
+export const isPlatform = typeof window !== 'undefined' && !!(window.platform || (window as any).ztools || (window as any).utools);
 
 //  dbStorage 适配 
 export const dbStorage = {
   getItem(key: string): any {
+    const platform = getPlatform();
     if (platform?.dbStorage) {
       return platform.dbStorage.getItem(key);
     }
@@ -29,6 +33,7 @@ export const dbStorage = {
   },
 
   setItem(key: string, value: any): void {
+    const platform = getPlatform();
     if (platform?.dbStorage) {
       platform.dbStorage.setItem(key, value);
       return;
@@ -39,6 +44,7 @@ export const dbStorage = {
   },
 
   removeItem(key: string): void {
+    const platform = getPlatform();
     if (platform?.dbStorage) {
       platform.dbStorage.removeItem(key);
       return;
@@ -52,6 +58,7 @@ export const dbStorage = {
 //  db 适配 
 export const db = {
   get(id: string): any {
+    const platform = getPlatform();
     if (platform?.db) {
       return platform.db.get(id);
     }
@@ -64,6 +71,7 @@ export const db = {
   },
 
   put(doc: any): { ok: boolean; id: string; rev?: string; error?: string } {
+    const platform = getPlatform();
     if (platform?.db) {
       return platform.db.put(doc);
     }
@@ -80,6 +88,7 @@ export const db = {
   },
 
   remove(doc: any): { ok: boolean; error?: string } {
+    const platform = getPlatform();
     if (platform?.db) {
       return platform.db.remove(doc);
     }
@@ -92,6 +101,7 @@ export const db = {
   },
 
   allDocs(key?: string): any[] {
+    const platform = getPlatform();
     if (platform?.db) {
       return platform.db.allDocs(key);
     }
@@ -119,6 +129,7 @@ export const db = {
 
 // 剪贴板
 export function copyText(text: string): void {
+  const platform = getPlatform();
   if (platform?.copyText) {
     platform.copyText(text);
     return;
@@ -139,6 +150,7 @@ export function copyText(text: string): void {
 }
 
 export function copyImage(dataUrl: string): void {
+  const platform = getPlatform();
   if (platform?.copyImage) {
     platform.copyImage(dataUrl);
     return;
@@ -148,6 +160,7 @@ export function copyImage(dataUrl: string): void {
 
 // 屏幕截图
 export function screenCapture(callback: (imagePath: string) => void): void {
+  const platform = getPlatform();
   if ((platform as any)?.screenCapture) {
     (platform as any).screenCapture(callback);
     return;
@@ -157,12 +170,13 @@ export function screenCapture(callback: (imagePath: string) => void): void {
 
 // 屏幕取色
 export function screenColorPick(callback: (result: { hex: string; rgb: string }) => void): void {
+  const platform = getPlatform();
   if (platform?.screenColorPick) {
     platform.screenColorPick(callback);
     return;
   }
   // 非平台环境: 使用浏览器原生 EyeDropper API (Chrome 95+)
-  if ((window as any).EyeDropper) {
+  if (typeof window !== 'undefined' && (window as any).EyeDropper) {
     const dropper = new (window as any).EyeDropper();
     dropper.open().then((result: any) => {
       callback({ hex: result.sRGBHex, rgb: '' });
@@ -174,14 +188,15 @@ export function screenColorPick(callback: (result: { hex: string; rgb: string })
 
 // 窗口控制
 export function hideMainWindow(): void {
+  const platform = getPlatform();
   if (platform?.hideMainWindow) {
     platform.hideMainWindow();
     return;
   }
-  // 非平台环境无操作
 }
 
 export function showMainWindow(): void {
+  const platform = getPlatform();
   if (platform?.showMainWindow) {
     platform.showMainWindow();
     return;
@@ -190,6 +205,7 @@ export function showMainWindow(): void {
 
 // 插件生命周期
 export function onPluginEnter(callback: (action: { code: string; type: string; payload: string }) => void): void {
+  const platform = getPlatform();
   if (platform?.onPluginEnter) {
     platform.onPluginEnter(callback);
     return;
@@ -199,6 +215,7 @@ export function onPluginEnter(callback: (action: { code: string; type: string; p
 }
 
 export function onPluginOut(callback: () => void): void {
+  const platform = getPlatform();
   if (platform?.onPluginOut) {
     platform.onPluginOut(callback);
     return;
@@ -206,22 +223,47 @@ export function onPluginOut(callback: () => void): void {
 }
 
 //  AI API 
-// 调用方式: platform.ai({model:"doubao-1.5-pro-32k", messages:[...]})
-// 返回 Promise<{content: string}>
-
 export function isAIAvailable(): boolean {
-  return !!(platform as any)?.ai && typeof (platform as any).ai === 'function';
+  const platform = getPlatform();
+  const ruck = typeof window !== 'undefined' ? (window as any).ruck : null;
+  return !!(ruck?.ai?.chat || ((platform as any)?.ai && typeof (platform as any).ai === 'function'));
 }
 
 export async function aiChat(messages: { role: string; content: string }[], model: string = 'doubao-1.5-pro-32k'): Promise<{ content: string }> {
   if (!isAIAvailable()) {
     throw new Error('当前版本不支持 AI 功能');
   }
-  return (platform as any).ai({ model, messages });
+  const platform = getPlatform();
+  if ((platform as any)?.ai) {
+    return (platform as any).ai({ model, messages });
+  }
+  const ruck = typeof window !== 'undefined' ? (window as any).ruck : null;
+  if (ruck?.ai?.chat) {
+    const rawModel = (model.startsWith('doubao-') || !model.trim()) ? '' : model.trim();
+    const request = {
+      model: rawModel,
+      messages: messages.map(m => ({ role: m.role || 'user', content: String(m.content || '') }))
+    };
+    let res: any;
+    try {
+      res = await ruck.ai.chat({}, request);
+    } catch (e: any) {
+      const msg = String(e?.message || e || '');
+      if (msg.includes('ChatRequestDto') || msg.includes('ProviderConfigDto')) {
+        res = await ruck.ai.chat(request, {});
+      } else {
+        throw e;
+      }
+    }
+    const content = typeof res === 'string' ? res : (res?.content || String(res || ''));
+    return { content };
+  }
+  throw new Error('当前版本不支持 AI 功能');
 }
 
 // 文件对话框
 export function showOpenDialog(options: any): string[] | undefined {
+  const platform = getPlatform();
   if (platform?.showOpenDialog) {
     return platform.showOpenDialog(options);
   }

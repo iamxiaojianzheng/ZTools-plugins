@@ -1,11 +1,12 @@
 {
-  "name": "color-helper",
+  "name": "@ruck-plugins/color-helper",
   "version": "1.0.0",
   "description": "颜色助手",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "build:compat": "node build-compat.js",
+    "build": "node build-compat.js && tsc && vite build",
+    "dev": "node build-compat.js && vite",
     "preview": "vite preview"
   },
   "dependencies": {

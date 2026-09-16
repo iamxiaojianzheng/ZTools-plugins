@@ -1,6 +1,7 @@
 {
   "name": "@ruck-plugins/color-helper",
   "title": "颜色助手",
+  "pluginName": "颜色助手",
   "description": "颜色、AI 配色、图片色卡、UI 色卡、传统色、渐变色、收藏颜色",
   "version": "1.0.0",
   "pluginType": "ui",

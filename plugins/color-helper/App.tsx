@@ -164,7 +164,11 @@ class App extends Component<{}, AppState> {
         }
       }
 
-      this.setState({ nav: code, setting });
+      // 归一化导航，防止未知 code 或 default 导致白屏
+      const validNavs = navItems.map(item => item.key);
+      const targetNav = validNavs.includes(code) ? code : "color";
+
+      this.setState({ nav: targetNav, setting });
     });
 
     onPluginOut(() => {
@@ -201,7 +205,13 @@ class App extends Component<{}, AppState> {
         pageContent = <GradientsPage onColorClick={this.handleColorClick} />;
         break;
       case "image":
-        pageContent = <ImagePalettePage onColorClick={this.handleColorClick} />;
+        pageContent = (
+          <ImagePalettePage
+            initialImage={this.imageEnterPayload}
+            onColorClick={this.handleColorClick}
+            showMessage={this.showMessage}
+          />
+        );
         break;
       case "collect":
         pageContent = <CollectColorsPage onColorClick={this.handleColorClick} />;
@@ -210,7 +220,7 @@ class App extends Component<{}, AppState> {
         pageContent = <AIPalettePage value={colorValue} onColorClick={this.handleColorClick} setting={setting} showMessage={this.showMessage} key={colorValue?.[0]} />;
         break;
       default:
-        pageContent = false;
+        pageContent = <ColorPage value={colorValue} onColorClick={this.handleColorClick} setting={setting} showMessage={this.showMessage} />;
     }
 
     return (
