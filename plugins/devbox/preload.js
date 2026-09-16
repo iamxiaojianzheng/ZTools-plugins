@@ -1,0 +1,259 @@
+(() => {
+  // src-compat/services.js
+  var services = {
+    // 原组件已有完善的 Web 标准 fallback，这里暴露安全的基础契约
+    async readFile(file) {
+      if (typeof window !== "undefined" && window.ruck?.fs?.readTextFile) {
+        return await window.ruck.fs.readTextFile(file);
+      }
+      throw new Error("\u8BF7\u4F7F\u7528\u539F\u751F\u6587\u4EF6\u9009\u62E9\u5668\u6216\u526A\u8D34\u677F");
+    },
+    async writeTextFile(filename, content) {
+      if (typeof window !== "undefined" && window.ruck?.fs?.writeTextFile) {
+        return await window.ruck.fs.writeTextFile(filename, content);
+      }
+      throw new Error("\u8BF7\u4F7F\u7528\u539F\u751F\u4E0B\u8F7D\u65B9\u5F0F");
+    },
+    async writeImageFile(base64Url) {
+      if (typeof window !== "undefined" && window.ruck?.fs?.writeImageFile) {
+        return await window.ruck.fs.writeImageFile(base64Url);
+      }
+      return void 0;
+    }
+  };
+
+  // src-compat/ztools.js
+  var isMac = typeof navigator !== "undefined" && navigator.platform.toUpperCase().includes("MAC");
+  var isWin = typeof navigator !== "undefined" && navigator.platform.toUpperCase().includes("WIN");
+  function getRuck() {
+    return typeof window !== "undefined" && window.ruck ? window.ruck : null;
+  }
+  var KNOWN_CODES = [
+    "identity",
+    "password",
+    "number",
+    "uuid",
+    "color",
+    "signature",
+    "base64",
+    "urlcodec",
+    "pinyin",
+    "qrcode",
+    "htmlpreview",
+    "timeconvert",
+    "textcompress",
+    "texttransform",
+    "jsontool"
+  ];
+  function createZtoolsBridge() {
+    let lastAction = null;
+    const bridge2 = {
+      // 平台识别
+      isMacOs() {
+        return isMac;
+      },
+      isWindows() {
+        return isWin;
+      },
+      // 路径查询
+      getPath(name) {
+        if (name === "downloads") return "downloads";
+        if (name === "temp") return "temp";
+        return "";
+      },
+      // 剪贴板文本
+      copyText(text) {
+        const ruck = getRuck();
+        if (ruck?.clipboard?.writeText) {
+          ruck.clipboard.writeText(text);
+          return true;
+        }
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(text);
+          return true;
+        }
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      // 剪贴板图片
+      copyImage(imageData) {
+        const ruck = getRuck();
+        if (ruck?.clipboard?.writeImage) {
+          ruck.clipboard.writeImage(imageData);
+          return true;
+        }
+        if (typeof window !== "undefined" && navigator.clipboard?.write && window.ClipboardItem) {
+          try {
+            const parts = String(imageData).split(",");
+            const base64 = parts.length > 1 ? parts[1] : parts[0];
+            const mimeMatch = String(imageData).match(/^data:(image\/\w+);/);
+            const mime = mimeMatch ? mimeMatch[1] : "image/png";
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: mime });
+            navigator.clipboard.write([new window.ClipboardItem({ [blob.type]: blob })]).catch(() => {
+            });
+            return true;
+          } catch {
+            return false;
+          }
+        }
+        return false;
+      },
+      // 窗口尺寸
+      setExpendHeight(height) {
+        const ruck = getRuck();
+        if (ruck?.window?.setExpendHeight) {
+          return ruck.window.setExpendHeight(height);
+        }
+        if (ruck?.setExpendHeight) {
+          return ruck.setExpendHeight(height);
+        }
+      },
+      // 窗口控制
+      hideMainWindow(restorePreWindow = true) {
+        const ruck = getRuck();
+        if (ruck?.window?.hideMainWindow) {
+          return ruck.window.hideMainWindow(restorePreWindow);
+        }
+        if (ruck?.hideMainWindow) {
+          return ruck.hideMainWindow(restorePreWindow);
+        }
+      },
+      showMainWindow() {
+        const ruck = getRuck();
+        if (ruck?.window?.showMainWindow) {
+          return ruck.window.showMainWindow();
+        }
+        if (ruck?.showMainWindow) {
+          return ruck.showMainWindow();
+        }
+      },
+      outPlugin(isKill = false) {
+        const ruck = getRuck();
+        if (ruck?.window?.outPlugin) {
+          return ruck.window.outPlugin(isKill);
+        }
+        if (ruck?.outPlugin) {
+          return ruck.outPlugin(isKill);
+        }
+      },
+      // 屏幕截图
+      screenCapture(callback) {
+        const ruck = getRuck();
+        if (ruck?.screenCapture) {
+          ruck.screenCapture(callback);
+          return;
+        }
+        if (ruck?.screen?.capture) {
+          ruck.screen.capture(callback);
+          return;
+        }
+        console.warn("[Devbox] screenCapture is not supported in this environment");
+      },
+      // 文件选择对话框
+      showOpenDialog(options = {}) {
+        const ruck = getRuck();
+        if (ruck?.window?.showOpenDialog) {
+          return ruck.window.showOpenDialog(options);
+        }
+        if (ruck?.showOpenDialog) {
+          return ruck.showOpenDialog(options);
+        }
+        return null;
+      },
+      // 获取启动 Action
+      getLaunchAction() {
+        return lastAction || { code: "identity", type: "text", payload: "" };
+      },
+      // 生命周期与 Action 智能纠偏
+      onPluginEnter(callback) {
+        let enterTriggered = false;
+        const wrappedCallback = (action = {}) => {
+          enterTriggered = true;
+          const normalized = { ...action };
+          if (!normalized.code || normalized.code === "default" || normalized.code === "main" || !KNOWN_CODES.includes(normalized.code)) {
+            normalized.code = "identity";
+          }
+          if (!normalized.type) {
+            normalized.type = "text";
+          }
+          if (normalized.payload === void 0) {
+            normalized.payload = "";
+          }
+          lastAction = normalized;
+          console.log(`[Devbox] onPluginEnter dispatching code: "${normalized.code}", type: "${normalized.type}"`);
+          if (typeof callback === "function") {
+            callback(normalized);
+          }
+        };
+        const ruck = getRuck();
+        if (ruck?.onPluginEnter) {
+          ruck.onPluginEnter(wrappedCallback);
+        } else if (ruck?.on) {
+          ruck.on("plugin-enter", wrappedCallback);
+        }
+        setTimeout(() => {
+          if (!enterTriggered) {
+            wrappedCallback({ code: "identity", type: "text", payload: "" });
+          }
+        }, 80);
+      },
+      onPluginOut(callback) {
+        const ruck = getRuck();
+        if (ruck?.onPluginOut) {
+          ruck.onPluginOut(callback);
+        } else if (ruck?.on) {
+          ruck.on("plugin-out", callback);
+        }
+      }
+    };
+    return bridge2;
+  }
+
+  // src-compat/index.js
+  var bridge = createZtoolsBridge();
+  window.ztools = bridge;
+  window.utools = bridge;
+  window.platform = bridge;
+  window.services = services;
+  function handleGlobalKeyDown(event) {
+    if (event.key === "Escape" || event.code === "Escape") {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) {
+        if (activeEl.value) {
+          return;
+        }
+      }
+      if (document.querySelector(".el-overlay:not([style*='display: none'])")) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        window.ztools.outPlugin();
+      } catch {
+        if (typeof window !== "undefined" && window.location) {
+          window.location.href = "ruck://action/close-plugin";
+        }
+      }
+    }
+  }
+  window.addEventListener("keydown", handleGlobalKeyDown, true);
+  document.addEventListener("keydown", handleGlobalKeyDown, true);
+  console.log("[Devbox] Ruck compatibility layer successfully mounted.");
+})();

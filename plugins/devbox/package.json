@@ -1,11 +1,12 @@
 {
-  "name": "myPlugins",
-  "version": "2.7.1",
+  "name": "@ruck-plugins/devbox",
+  "version": "1.0.0",
   "description": "开发百宝箱，提供随机生成、Base64 编解码、URL 编解码、加密签名、二维码、文本压缩、开发辅助等常用工具集",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build"
+    "build:compat": "node build-compat.js",
+    "build": "node build-compat.js && vite build"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",
