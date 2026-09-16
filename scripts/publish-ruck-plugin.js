@@ -2,6 +2,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { execSync, spawnSync } from 'child_process';
 import readline from 'readline';
 
@@ -186,6 +187,71 @@ function executeBuild(pluginDir) {
   }
 }
 
+// 查找插件项目中的说明文档（大小写不敏感匹配，支持常见扩展名与子目录检索）
+function findProjectReadme(pluginDir) {
+  const searchDirs = [pluginDir, path.join(pluginDir, 'public')];
+  const readmePatterns = [
+    /^readme\.md$/i,
+    /^readme\.markdown$/i,
+    /^readme\.txt$/i,
+    /^readme$/i
+  ];
+
+  for (const dir of searchDirs) {
+    if (!fs.existsSync(dir)) continue;
+    try {
+      const files = fs.readdirSync(dir);
+      for (const pattern of readmePatterns) {
+        const match = files.find(file => pattern.test(file));
+        if (match) {
+          return path.join(dir, match);
+        }
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+// 将项目说明文档规范化同步至 dist/readme.md
+function syncReadmeToDist(pluginDir, distDir) {
+  const srcReadme = findProjectReadme(pluginDir);
+  const targetReadme = path.join(distDir, 'readme.md');
+
+  if (srcReadme) {
+    // Windows 环境大小写防御：若目标目录已存在同名但大小写不同的文件，先安全删除以确保以小写 readme.md 文件名落盘
+    if (fs.existsSync(targetReadme)) {
+      try {
+        fs.unlinkSync(targetReadme);
+      } catch (e) {}
+    }
+    fs.copyFileSync(srcReadme, targetReadme);
+    const relPath = path.relative(pluginDir, srcReadme);
+    success(`已同步说明文档: ${relPath} -> dist/readme.md`);
+    return true;
+  } else {
+    warn(`未在项目中检测到说明文档 (README.md / readme.md)，dist 产物中将不包含说明文件。`);
+    return false;
+  }
+}
+
+// 在终端打印待发布产物清单看板
+function printPublishArtifactsSummary(publishDir) {
+  log(`\n📦 待发布产物清单 [${path.basename(publishDir)}/]:`, colors.cyan);
+  try {
+    const items = fs.readdirSync(publishDir);
+    for (const item of items) {
+      const fullPath = path.join(publishDir, item);
+      const stat = fs.statSync(fullPath);
+      const isDir = stat.isDirectory();
+      const sizeStr = isDir ? '<DIR>' : `${(stat.size / 1024).toFixed(1)} KB`;
+      const isKeyDoc = item.toLowerCase() === 'readme.md' || item === 'plugin.json' || item === 'package.json';
+      const mark = isKeyDoc ? `${colors.green}★${colors.reset}` : ' ';
+      console.log(`  ${mark} ${item.padEnd(26)} ${colors.gray}${sizeStr}${colors.reset}`);
+    }
+  } catch (e) {}
+  console.log('');
+}
+
 function preparePublishDir(pluginDir, targetVersion) {
   const distDir = path.join(pluginDir, 'dist');
   const hasDist = fs.existsSync(distDir) && fs.existsSync(path.join(distDir, 'index.html'));
@@ -193,16 +259,71 @@ function preparePublishDir(pluginDir, targetVersion) {
   if (hasDist) {
     info(`📦 准备发布 dist/ 目录产物...`);
     const rootPkgPath = path.join(pluginDir, 'package.json');
-    let pkg = { name: path.basename(pluginDir), version: targetVersion };
+    const pluginJsonPath = fs.existsSync(path.join(pluginDir, 'public', 'plugin.json'))
+      ? path.join(pluginDir, 'public', 'plugin.json')
+      : path.join(pluginDir, 'plugin.json');
+
+    let pluginMeta = {};
+    if (fs.existsSync(pluginJsonPath)) {
+      try {
+        pluginMeta = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf8'));
+      } catch (e) {}
+    }
+
+    let pkg = {
+      name: pluginMeta.name || path.basename(pluginDir),
+      version: targetVersion,
+      description: pluginMeta.description || '',
+      author: pluginMeta.author || ''
+    };
+
     if (fs.existsSync(rootPkgPath)) {
       try {
         const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
-        pkg = { ...rootPkg, version: targetVersion };
+        pkg = {
+          ...rootPkg,
+          name: rootPkg.name || pkg.name,
+          version: targetVersion,
+          description: rootPkg.description || pkg.description,
+          author: rootPkg.author || pkg.author
+        };
       } catch (e) {}
     }
     delete pkg.scripts;
     delete pkg.devDependencies;
     fs.writeFileSync(path.join(distDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+
+    // 1. 同步说明文档至 dist/readme.md
+    syncReadmeToDist(pluginDir, distDir);
+
+    // 2. 校验并同步 dist/plugin.json 及其版本
+    const distPluginJson = path.join(distDir, 'plugin.json');
+    if (!fs.existsSync(distPluginJson) && fs.existsSync(pluginJsonPath)) {
+      fs.copyFileSync(pluginJsonPath, distPluginJson);
+      info(`已将 plugin.json 同步至 dist/plugin.json`);
+    }
+    if (fs.existsSync(distPluginJson)) {
+      try {
+        const pData = JSON.parse(fs.readFileSync(distPluginJson, 'utf8'));
+        if (pData.version !== targetVersion) {
+          pData.version = targetVersion;
+          fs.writeFileSync(distPluginJson, JSON.stringify(pData, null, 2) + '\n', 'utf8');
+        }
+      } catch (e) {}
+    }
+
+    // 3. 兜底补齐图标资源 (logo.png / icon.png / logo.svg)
+    const iconNames = ['logo.png', 'icon.png', 'logo.svg'];
+    for (const icon of iconNames) {
+      const srcIcon = fs.existsSync(path.join(pluginDir, 'public', icon))
+        ? path.join(pluginDir, 'public', icon)
+        : path.join(pluginDir, icon);
+      const targetIcon = path.join(distDir, icon);
+      if (fs.existsSync(srcIcon) && !fs.existsSync(targetIcon)) {
+        fs.copyFileSync(srcIcon, targetIcon);
+      }
+    }
+
     return distDir;
   } else {
     info(`📦 准备发布插件根目录产物...`);
@@ -217,6 +338,12 @@ function preparePublishDir(pluginDir, targetVersion) {
         description: pData.description || '',
         author: pData.author || ''
       }, null, 2) + '\n', 'utf8');
+    }
+
+    // 检查根目录下是否存在说明文档
+    const readmeFile = findProjectReadme(pluginDir);
+    if (!readmeFile) {
+      warn(`未在项目中检测到说明文档 (README.md / readme.md)`);
     }
 
     // 写入过滤开发文件的 .npmignore
@@ -312,6 +439,8 @@ async function main() {
 
   const publishDir = preparePublishDir(targetPlugin.fullPath, newVersion);
 
+  printPublishArtifactsSummary(publishDir);
+
   const confirm = await ask(`\n确认立即发布 ${targetPlugin.name}@${newVersion} 到 NPM? (y/N):`);
   if (confirm.toLowerCase() !== 'y') {
     warn('发布已取消。');
@@ -334,7 +463,20 @@ async function main() {
   console.log(`2. GitHub Actions 将自动触发 ruck-plugin-registry 同步并部署上线！\n`);
 }
 
-main().catch(err => {
-  error(`异常: ${err.message}`);
-  process.exit(1);
-});
+const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isDirectRun) {
+  main().catch(err => {
+    error(`异常: ${err.message}`);
+    process.exit(1);
+  });
+}
+
+export {
+  findProjectReadme,
+  syncReadmeToDist,
+  preparePublishDir,
+  printPublishArtifactsSummary,
+  bumpVersion,
+  isRuckPlugin,
+  scanRuckPlugins
+};
