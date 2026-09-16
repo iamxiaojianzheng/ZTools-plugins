@@ -11,7 +11,8 @@
     "test:package-manager": "node --test scripts/package-manager.test.js",
     "test:manifest": "node --test scripts/generate-plugins-json.test.js",
     "clean:plugins-node-modules": "node scripts/clean-plugin-node-modules.js",
-    "generate": "node scripts/generate-plugins-json.js"
+    "generate": "node scripts/generate-plugins-json.js",
+    "release:ruck": "node scripts/publish-ruck-plugin.js"
   },
   "dependencies": {
     "@octokit/rest": "^20.0.2",
