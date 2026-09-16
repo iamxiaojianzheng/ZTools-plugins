@@ -21,7 +21,8 @@
 
 ```text
 plugins/[plugin-name]/
-├── plugin.json               # Ruck 插件清单 (声明 pluginType: "ui"、permissions、features)
+├── package.json              # 依赖与发布配置 (强约束: name 必须带有 "@ruck-plugins/" 前缀)
+├── plugin.json               # Ruck 插件清单 (强约束: name 建议带前缀，声明 pluginType: "ui"、permissions)
 ├── index.html                # 前端入口 (提前载入 preload.js 并声明 icon 标签)
 ├── index.js                  # 原插件前端逻辑代码 (保持不修改，保证可维护性)
 ├── preload.js                # 最终构建产物 (由 build.js 编译生成，供 Webview 加载)
@@ -33,6 +34,22 @@ plugins/[plugin-name]/
     ├── database.js           # PouchDB 兼容规范数据库 (双轨持久化层)
     ├── image-picker.js       # (按需) 图片与文件选择、React Fiber 状态注入模块
     └── md5.js                # (按需) 纯 JS 标准哈希算法实现
+```
+
+### 2.1 包名与清单命名规范 (`@ruck-plugins/` Scope 强约束)
+> **极其重要**：`package.json` 中的 `name` 字段**必须统一加上 `@ruck-plugins/` 前缀**（例如 `"@ruck-plugins/color-helper"`、`"@ruck-plugins/memo-quick-paste"`）。
+
+- **作用 1：构建识别契约**：发布与扫描工具（如 `scripts/publish-ruck-plugin.js`）依赖 `name.startsWith("@ruck-plugins/")` 作为识别 Ruck 现代化插件的核心判定依据；
+- **作用 2：NPM 组织分发隔离**：所有 Ruck 插件统一发布到 `@ruck-plugins` 组织下，避免与普通 npm 包或 uTools 存量包命名冲突；
+- **作用 3：清单对齐**：`plugin.json` 中的 `name` 字段亦应与 `package.json` 同步设置为 `@ruck-plugins/[plugin-name]`。
+
+```json
+// package.json 核心字段规范示例
+{
+  "name": "@ruck-plugins/plugin-name",
+  "version": "1.0.0",
+  "type": "module"
+}
 ```
 
 ### 构建脚本标准模板 (`build.js`)：
@@ -154,8 +171,9 @@ flowchart LR
 
 ## 5. 新插件适配四步速查清单 (Quick Checklist)
 
-- [ ] **Step 1: 权限与清单** (`plugin.json`)
-  - 声明 `"pluginType": "ui"`，补充必要的 `permissions`（如 `clipboard_write`, `window_control`）。
+- [ ] **Step 1: 包名、权限与清单** (`package.json` & `plugin.json`)
+  - `package.json` 中的 `name` **必须增加 `@ruck-plugins/` 前缀**（如 `"@ruck-plugins/plugin-name"`）；
+  - `plugin.json` 中的 `name` 同步对齐前缀；声明 `"pluginType": "ui"`，补充必要的 `permissions`（如 `clipboard_write`, `window_control`）。
 - [ ] **Step 2: 入口 HTML 挂载** (`index.html`)
   - 在 `<head>` 第一行加入 `<script src="preload.js"></script>`；
   - 加入 `<link rel="icon" type="image/png" href="logo.png" />` 消除 404 资源错误。
