@@ -313,8 +313,13 @@ function handlePluginEnter(action: { code: string; type: string; payload: any })
     return
   }
   route.value = 'main'
+  loadSettings()
+  activeGroupId.value = getStorage(ACTIVE_GROUP_KEY, activeGroupId.value)
+  activeTaskId.value = getStorage(ACTIVE_TASK_KEY, '')
   if (action.code === 'add') {
-    const text = Array.isArray(action.payload) ? action.payload.join('\n') : String(action.payload || '')
+    let text = Array.isArray(action.payload) ? action.payload.join('\n') : String(action.payload || '')
+    text = text.replace(/^(todo|待办)\s+/i, '').trim()
+    if (!text) return
     createTask(text, activeGroupId.value, activeTaskId.value || null)
     window.ztools?.showNotification?.('已添加到待办')
     return
@@ -339,6 +344,13 @@ const { handleKeyboard, handleSettingsEscape } = useTodoKeyboard({
   openTaskSearch
 })
 
+function handleVisibilityOrFocus() {
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+    loadSettings()
+    refreshData()
+  }
+}
+
 function mountStore() {
   if (mounted) return
   mounted = true
@@ -350,6 +362,8 @@ function mountStore() {
   window.addEventListener('hashchange', parseRoute)
   window.addEventListener('keydown', handleSettingsEscape, { capture: true })
   window.addEventListener('keydown', handleKeyboard)
+  window.addEventListener('focus', handleVisibilityOrFocus)
+  document.addEventListener('visibilitychange', handleVisibilityOrFocus)
   window.ztools?.onPluginEnter?.(handlePluginEnter)
   window.ztools?.onDbPull?.(() => refreshData())
   tomatoInterval = window.setInterval(() => {
@@ -361,6 +375,8 @@ function unmountStore() {
   window.removeEventListener('hashchange', parseRoute)
   window.removeEventListener('keydown', handleSettingsEscape, { capture: true })
   window.removeEventListener('keydown', handleKeyboard)
+  window.removeEventListener('focus', handleVisibilityOrFocus)
+  document.removeEventListener('visibilitychange', handleVisibilityOrFocus)
   if (tomatoInterval) {
     window.clearInterval(tomatoInterval)
     tomatoInterval = undefined

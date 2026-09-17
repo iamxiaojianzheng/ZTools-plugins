@@ -106,10 +106,37 @@ export function useTodoTasks(options: TodoTasksOptions) {
       deleteTaskId.value = ''
       return
     }
+
+    const currentTasks = options.visibleTasks.value
+    const currentIndex = currentTasks.findIndex((item) => item._id === task._id)
+    const isDeletingActive = options.activeTaskId.value === task._id
+
+    let nextActiveId = options.activeTaskId.value
+    if (isDeletingActive) {
+      if (currentIndex > 0) {
+        // 存在上一项：优先选择被删除项的上一项
+        nextActiveId = currentTasks[currentIndex - 1]._id
+      } else if (currentTasks.length > 1) {
+        // 被删除项是首项，顺延选择后一项（删除后成为新首项）
+        nextActiveId = currentTasks[1]._id
+      } else {
+        // 列表中只有当前项，删除后列表变空
+        nextActiveId = ''
+      }
+    }
+
     removeDoc(task._id)
     deleteTaskId.value = ''
     options.refreshData()
-    if (options.activeTaskId.value === task._id) options.activeTaskId.value = options.visibleTasks.value[0]?._id || ''
+
+    if (isDeletingActive) {
+      options.selectTask(nextActiveId)
+      if (nextActiveId) {
+        nextTick(() => {
+          document.querySelector<HTMLElement>('.task-card.active')?.scrollIntoView({ block: 'nearest' })
+        })
+      }
+    }
   }
 
   function moveTask(task: TaskDoc, position: 'top' | 'bottom') {

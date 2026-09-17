@@ -1,11 +1,12 @@
 {
-  "name": "todo",
+  "name": "@ruck-plugins/todo-neo",
   "version": "1.0.0",
   "description": "快速记录和查看待办事项，支持 vim 键位操作",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build"
+    "build:compat": "node build-compat.js",
+    "build": "node build-compat.js && vue-tsc && vite build"
   },
   "dependencies": {
     "@types/markdown-it": "^14.1.2",
