@@ -1,6 +1,6 @@
 {
   "name": "@ruck-plugins/otp-2fa",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "安全、简约且高效的 2FA 令牌管理器，支持 TOTP/HOTP/Steam 多种协议。",
   "type": "module",
   "scripts": {

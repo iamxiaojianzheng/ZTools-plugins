@@ -6,7 +6,7 @@
   "description": "安全、简约且高效的 2FA 令牌管理器，支持 TOTP/HOTP/Steam 多种协议。",
   "author": "狄硕",
   "homepage": "https://github.com/dishuo183/ZTools-plugins",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.html",
   "preload": "preload.js",
   "logo": "logo.png",
@@ -22,7 +22,11 @@
   "development": {
     "main": "http://localhost:5173"
   },
-  "platform": ["win32", "darwin", "linux"],
+  "platform": [
+    "win32",
+    "darwin",
+    "linux"
+  ],
   "ai": true,
   "features": [
     {
