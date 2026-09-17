@@ -3,7 +3,7 @@
  * 无需依赖 React 前端渲染，提供 0ms 本地持久化与静默快速入库
  */
 
-const STORAGE_KEY = "todos-data";
+import { getTodosData, persistTodosData } from "./database.js";
 
 function formatDate(date) {
   const year = date.getFullYear();
@@ -24,39 +24,11 @@ function stripPrefix(text = "") {
 }
 
 function getStorageData() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return {
-        version: "1.0.0",
-        workspaces: { work: [], life: [], study: [] },
-        currentWorkspace: "work"
-      };
-    }
-    const parsed = JSON.parse(raw);
-    if (!parsed.workspaces) {
-      parsed.workspaces = { work: [], life: [], study: [] };
-    }
-    if (!parsed.currentWorkspace) {
-      parsed.currentWorkspace = "work";
-    }
-    return parsed;
-  } catch (e) {
-    console.error("[TodosQuickAdd] Failed to parse localStorage data:", e);
-    return {
-      version: "1.0.0",
-      workspaces: { work: [], life: [], study: [] },
-      currentWorkspace: "work"
-    };
-  }
+  return getTodosData();
 }
 
 function saveStorageData(data) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch (e) {
-    console.error("[TodosQuickAdd] Failed to save localStorage data:", e);
-  }
+  persistTodosData(data);
 }
 
 /**

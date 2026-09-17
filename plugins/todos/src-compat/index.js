@@ -4,6 +4,7 @@
 import { services } from "./services.js";
 import { createZtoolsBridge } from "./ztools.js";
 import { setupQuickAddEngine } from "./quick-add.js";
+import { persistTodosData } from "./database.js";
 
 // 全局单例防重复挂载守卫
 if (typeof window !== "undefined" && window.__RUCK_TODOS_COMPAT_MOUNTED__) {
@@ -21,6 +22,26 @@ if (typeof window !== "undefined" && window.__RUCK_TODOS_COMPAT_MOUNTED__) {
 
   // 2. 装配 onMainPush 快捷添加待办引擎
   setupQuickAddEngine(bridge);
+
+  // 3. 安装 localStorage.setItem('todos-data') 透明落盘守卫，直通 ruck.db
+  try {
+    if (typeof localStorage !== "undefined") {
+      const originalSetItem = localStorage.setItem.bind(localStorage);
+      localStorage.setItem = function (key, value) {
+        originalSetItem(key, value);
+        if (key === "todos-data") {
+          try {
+            const parsed = JSON.parse(value);
+            persistTodosData(parsed);
+          } catch (err) {
+            console.warn("[Todos] Failed to auto-persist todos-data:", err);
+          }
+        }
+      };
+    }
+  } catch (e) {
+    console.warn("[Todos] Failed to setup localStorage hook:", e);
+  }
 
   // 2. 全局 Escape 退出生命周期治理
   function handleGlobalKeyDown(event) {

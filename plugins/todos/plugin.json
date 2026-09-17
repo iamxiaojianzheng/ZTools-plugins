@@ -8,11 +8,18 @@
   "version": "1.0.0",
   "main": "index.html",
   "preload": "preload.js",
-  "logo": "logo.svg",
+  "logo": "logo.png",
   "development": {
     "main": "http://localhost:5173"
   },
-  "permissions": ["clipboard_write", "window_control", "notification"],
+  "permissions": [
+    "clipboard_write",
+    "window_control",
+    "notification",
+    "storage_get",
+    "storage_put",
+    "storage_delete"
+  ],
   "features": [
     {
       "code": "Todos",

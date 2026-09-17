@@ -3,7 +3,7 @@
  * 连接 todo-neo 前端与 Ruck (Tauri 2.0 Webview2) 运行时
  */
 
-import { db, dbStorage, onDataChange, reloadFromStorage } from "./database.js";
+import { db, dbStorage, onDataChange, reloadFromStorage, initDatabase } from "./database.js";
 import { toolHandlers } from "./tools.js";
 
 // 当数据库底层发生变更时自动广播 onDbPull
@@ -70,9 +70,9 @@ function normalizeAction(rawAction = {}) {
 }
 
 /**
- * 统一分发 plugin-enter 事件 (包含 350ms 事件指纹去重)
+ * 统一分发 plugin-enter 事件 (异步严格时序保证，先确保预热完成再执行业务派发)
  */
-function dispatchPluginEnter(rawAction) {
+async function dispatchPluginEnter(rawAction) {
   const normalized = normalizeAction(rawAction);
   const fingerprint = `${normalized.code}:${normalized.type}:${JSON.stringify(normalized.payload)}`;
   const now = Date.now();
@@ -93,11 +93,11 @@ function dispatchPluginEnter(rawAction) {
     fallbackTimer = null;
   }
 
-  // 每次进入插件（特别是第二次/多次进入），优先全量原子刷新底层存储
+  // 核心时序保障：必须先确保 SQLite 底层全量预热完成，再执行业务派发
   try {
-    reloadFromStorage();
+    await initDatabase(true);
   } catch (err) {
-    console.error("[TodoNeo] reloadFromStorage error in dispatchPluginEnter:", err);
+    console.error("[TodoNeo] initDatabase error before dispatch:", err);
   }
 
   console.log(`[TodoNeo] dispatchPluginEnter: code="${normalized.code}", type="${normalized.type}", payload=`, normalized.payload);
@@ -136,8 +136,8 @@ function setupHostEventListeners() {
 
   // 1. 唯一权威契约：直连 Ruck 宿主官方生命周期 API (内置插件隔离与事件缓冲)
   if (typeof ruck?.onPluginEnter === "function") {
-    ruck.onPluginEnter((action) => {
-      dispatchPluginEnter(action);
+    ruck.onPluginEnter(async (action) => {
+      await dispatchPluginEnter(action);
     });
   }
 

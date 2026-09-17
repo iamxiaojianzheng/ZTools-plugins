@@ -4,8 +4,7 @@
  */
 
 import { quickAddTask } from "./quick-add.js";
-
-const STORAGE_PREFIX = "ruck_todos_db_";
+import { dbStorage, initDatabase } from "./database.js";
 
 function getRuck() {
   return typeof window !== "undefined" && window.ruck ? window.ruck : null;
@@ -42,7 +41,7 @@ function normalizeAction(rawAction = {}) {
 
 let currentBridgeInstance = null;
 
-function dispatchPluginEnter(rawAction) {
+async function dispatchPluginEnter(rawAction) {
   const normalized = normalizeAction(rawAction);
   const fingerprint = `${normalized.code}:${normalized.type}:${JSON.stringify(normalized.payload)}`;
   const now = Date.now();
@@ -60,6 +59,13 @@ function dispatchPluginEnter(rawAction) {
   if (fallbackTimer) {
     clearTimeout(fallbackTimer);
     fallbackTimer = null;
+  }
+
+  // 核心时序防竞态：必须先确保 SQLite 底层全量预热完成，再执行业务派发
+  try {
+    await initDatabase(true);
+  } catch (err) {
+    console.warn("[Todos] initDatabase refresh error on enter:", err);
   }
 
   console.log(`[Todos] dispatchPluginEnter: code="${normalized.code}", type="${normalized.type}"`);
@@ -102,8 +108,8 @@ function setupHostEventListeners() {
 
   // 1. 唯一权威契约：直连 Ruck 宿主官方生命周期 API (内置插件隔离与事件缓冲)
   if (typeof ruck?.onPluginEnter === "function") {
-    ruck.onPluginEnter((action) => {
-      dispatchPluginEnter(action);
+    ruck.onPluginEnter(async (action) => {
+      await dispatchPluginEnter(action);
     });
   }
 
@@ -114,7 +120,21 @@ function setupHostEventListeners() {
     });
   }
 
-  // 3. 300ms 冷启动保底
+  // 3. 视窗可见性与焦点监听 (从后台切回前台时预热刷新)
+  if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        initDatabase(true);
+      }
+    });
+  }
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("focus", () => {
+      initDatabase(true);
+    });
+  }
+
+  // 4. 300ms 冷启动保底
   fallbackTimer = setTimeout(() => {
     if (!lastAction && enterListeners.size > 0) {
       console.log("[Todos] 300ms auto-fallback triggering default onPluginEnter");
@@ -125,41 +145,6 @@ function setupHostEventListeners() {
 
 export function createZtoolsBridge() {
   setupHostEventListeners();
-
-  // 1. dbStorage 命名空间存储映射
-  const dbStorage = {
-    getItem(key) {
-      try {
-        const fullKey = `${STORAGE_PREFIX}${key}`;
-        const val = localStorage.getItem(fullKey);
-        if (val === null) {
-          return localStorage.getItem(key);
-        }
-        return val;
-      } catch (err) {
-        console.error("[Todos] dbStorage.getItem failed:", err);
-        return null;
-      }
-    },
-    setItem(key, value) {
-      try {
-        const fullKey = `${STORAGE_PREFIX}${key}`;
-        const strVal = typeof value === "string" ? value : JSON.stringify(value);
-        localStorage.setItem(fullKey, strVal);
-        localStorage.setItem(key, strVal);
-      } catch (err) {
-        console.error("[Todos] dbStorage.setItem failed:", err);
-      }
-    },
-    removeItem(key) {
-      try {
-        localStorage.removeItem(`${STORAGE_PREFIX}${key}`);
-        localStorage.removeItem(key);
-      } catch (err) {
-        console.error("[Todos] dbStorage.removeItem failed:", err);
-      }
-    }
-  };
 
   const bridge = {
     dbStorage,

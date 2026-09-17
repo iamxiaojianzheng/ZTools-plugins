@@ -27,122 +27,29 @@
   };
 
   // src-compat/database.js
-  var DB_NAME = "ruck_todo_neo_db";
-  var DB_VERSION = 1;
-  var STORE_DOCS = "docs";
-  var LOCAL_STORAGE_KEY = "ruck_todo_neo_docs";
-  var STORAGE_PREFIX = "ruck_todo_neo_storage_";
+  var CONFIG_PREFIX = "config:";
+  var LEGACY_STORAGE_DOCS_KEY = "ruck_todo_neo_docs";
+  var LEGACY_STORAGE_PREFIX = "ruck_todo_neo_storage_";
   var docsMap = /* @__PURE__ */ new Map();
-  var dbInstance = null;
+  var storageMap = /* @__PURE__ */ new Map();
+  var pendingWrites = /* @__PURE__ */ new Map();
+  var PENDING_WINDOW_MS = 3e3;
   var initPromise = null;
-  function reloadFromStorage() {
-    try {
-      if (typeof localStorage !== "undefined") {
-        const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (raw) {
-          const list = JSON.parse(raw);
-          if (Array.isArray(list)) {
-            docsMap.clear();
-            for (const doc of list) {
-              if (doc && doc._id) {
-                docsMap.set(doc._id, doc);
-              }
-            }
-            return docsMap.size;
-          }
-        }
-      }
-    } catch (err) {
-      console.error("[TodoNeoDB] reloadFromStorage failed:", err);
-    }
-    return docsMap.size;
-  }
-  function syncToLocalStorage() {
-    try {
-      if (typeof localStorage !== "undefined") {
-        const all = Array.from(docsMap.values());
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(all));
-      }
-    } catch (err) {
-      console.error("[TodoNeoDB] syncToLocalStorage failed:", err);
-    }
-  }
-  reloadFromStorage();
-  function openIDB() {
-    return new Promise((resolve, reject) => {
-      if (typeof indexedDB === "undefined") {
-        return resolve(null);
-      }
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-      request.onupgradeneeded = (event) => {
-        const db2 = event.target.result;
-        if (!db2.objectStoreNames.contains(STORE_DOCS)) {
-          db2.createObjectStore(STORE_DOCS, { keyPath: "_id" });
-        }
-      };
-      request.onsuccess = (event) => {
-        resolve(event.target.result);
-      };
-      request.onerror = (event) => {
-        console.error("[TodoNeoDB] Failed to open IndexedDB:", event.target.error);
-        reject(event.target.error);
-      };
-    });
-  }
-  function initDatabase() {
-    if (!initPromise) {
-      const loader = (async () => {
-        try {
-          dbInstance = await openIDB();
-          if (!dbInstance) return;
-          await new Promise((resolve) => {
-            const tx = dbInstance.transaction(STORE_DOCS, "readonly");
-            const store = tx.objectStore(STORE_DOCS);
-            const req = store.getAll();
-            req.onsuccess = () => {
-              const list = req.result || [];
-              for (const doc of list) {
-                docsMap.set(doc._id, doc);
-              }
-              resolve();
-            };
-            req.onerror = () => resolve();
-          });
-        } catch (err) {
-          console.error("[TodoNeoDB] IndexedDB init error:", err);
-        }
-      })();
-      const safeTimeout = typeof window !== "undefined" && window.setTimeout ? window.setTimeout : typeof setTimeout !== "undefined" ? setTimeout : (fn) => fn();
-      initPromise = Promise.race([
-        loader,
-        new Promise((res) => safeTimeout(res, 200))
-      ]);
-    }
-    return initPromise;
-  }
-  async function persistDocToIDB(doc) {
-    try {
-      await initDatabase();
-      if (!dbInstance) return;
-      const tx = dbInstance.transaction(STORE_DOCS, "readwrite");
-      const store = tx.objectStore(STORE_DOCS);
-      store.put(doc);
-    } catch (err) {
-      console.error("[TodoNeoDB] persistDocToIDB error:", err);
-    }
-  }
-  async function removeDocFromIDB(id) {
-    try {
-      await initDatabase();
-      if (!dbInstance) return;
-      const tx = dbInstance.transaction(STORE_DOCS, "readwrite");
-      const store = tx.objectStore(STORE_DOCS);
-      store.delete(id);
-    } catch (err) {
-      console.error("[TodoNeoDB] removeDocFromIDB error:", err);
-    }
-  }
   var changeListeners = /* @__PURE__ */ new Set();
+  function getRuckStorage() {
+    if (typeof window !== "undefined" && window.ruck?.storage) {
+      return window.ruck.storage;
+    }
+    return null;
+  }
+  function cleanupPendingWrites() {
+    const now = Date.now();
+    for (const [id, ts] of pendingWrites.entries()) {
+      if (now - ts > PENDING_WINDOW_MS) {
+        pendingWrites.delete(id);
+      }
+    }
+  }
   function onDataChange(callback) {
     if (typeof callback !== "function") return () => {
     };
@@ -158,14 +65,108 @@
       }
     }
   }
-  if (typeof window !== "undefined" && window.addEventListener) {
-    window.addEventListener("storage", (event) => {
-      if (event.key === LOCAL_STORAGE_KEY) {
-        console.log("[TodoNeoDB] storage event detected for docs, reloading...");
-        reloadFromStorage();
-        notifyDataChange("storage", null);
+  function migrateFromLegacyStorage(storage) {
+    try {
+      if (typeof localStorage === "undefined") return;
+      const legacyDocsRaw = localStorage.getItem(LEGACY_STORAGE_DOCS_KEY);
+      if (legacyDocsRaw) {
+        const list = JSON.parse(legacyDocsRaw);
+        if (Array.isArray(list) && list.length > 0) {
+          console.log(`[TodoNeoDB] Migrating ${list.length} legacy docs to ruck.db...`);
+          for (const doc of list) {
+            if (doc && doc._id) {
+              docsMap.set(doc._id, doc);
+              if (storage?.set) {
+                storage.set(doc._id, doc).catch(() => {
+                });
+              }
+            }
+          }
+        }
       }
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(LEGACY_STORAGE_PREFIX)) {
+          const subKey = k.slice(LEGACY_STORAGE_PREFIX.length);
+          const valRaw = localStorage.getItem(k);
+          if (valRaw !== null) {
+            try {
+              const parsed = JSON.parse(valRaw);
+              storageMap.set(subKey, parsed);
+              if (storage?.set) {
+                storage.set(`${CONFIG_PREFIX}${subKey}`, parsed).catch(() => {
+                });
+              }
+            } catch {
+              storageMap.set(subKey, valRaw);
+              if (storage?.set) {
+                storage.set(`${CONFIG_PREFIX}${subKey}`, valRaw).catch(() => {
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[TodoNeoDB] migrateFromLegacyStorage failed:", err);
+    }
+  }
+  async function initDatabase(forceRefresh = false) {
+    if (initPromise && !forceRefresh) return initPromise;
+    initPromise = (async () => {
+      const storage = getRuckStorage();
+      if (!storage) {
+        migrateFromLegacyStorage(null);
+        return docsMap.size;
+      }
+      try {
+        cleanupPendingWrites();
+        if (typeof storage.all === "function") {
+          const allRecords = await storage.all();
+          if (Array.isArray(allRecords) && allRecords.length > 0) {
+            const remoteKeys = /* @__PURE__ */ new Set();
+            for (const item of allRecords) {
+              if (!item || !item.key) continue;
+              remoteKeys.add(item.key);
+              if (item.key.startsWith(CONFIG_PREFIX)) {
+                const cfgKey = item.key.slice(CONFIG_PREFIX.length);
+                storageMap.set(cfgKey, item.value);
+              } else {
+                if (pendingWrites.has(item.key)) {
+                  continue;
+                }
+                const doc = item.value && item.value._id ? item.value : { ...item.value, _id: item.key };
+                docsMap.set(item.key, doc);
+              }
+            }
+            for (const localId of Array.from(docsMap.keys())) {
+              if (!remoteKeys.has(localId) && !pendingWrites.has(localId)) {
+                docsMap.delete(localId);
+              }
+            }
+            console.log(`[TodoNeoDB] Synced ${docsMap.size} docs and ${storageMap.size} configs from ruck.db`);
+          } else {
+            migrateFromLegacyStorage(storage);
+          }
+        } else {
+          migrateFromLegacyStorage(storage);
+        }
+      } catch (err) {
+        console.error("[TodoNeoDB] initDatabase failed:", err);
+        migrateFromLegacyStorage(storage);
+      }
+      return docsMap.size;
+    })();
+    return initPromise;
+  }
+  function reloadFromStorage() {
+    return initDatabase(true).then((size) => {
+      notifyDataChange("reload", null);
+      return size;
     });
+  }
+  if (typeof window !== "undefined") {
+    initDatabase();
   }
   var db = {
     allDocs(keyOrPrefix) {
@@ -193,8 +194,13 @@
         _rev: rev
       };
       docsMap.set(doc._id, newDoc);
-      syncToLocalStorage();
-      persistDocToIDB(newDoc);
+      pendingWrites.set(doc._id, Date.now());
+      const storage = getRuckStorage();
+      if (storage?.set) {
+        storage.set(doc._id, newDoc).catch((err) => {
+          console.error(`[TodoNeoDB] Failed to persist ${doc._id} to ruck.db:`, err);
+        });
+      }
       notifyDataChange("put", newDoc);
       return { ok: true, id: newDoc._id, rev: newDoc._rev };
     },
@@ -204,8 +210,17 @@
         return { ok: false, message: "Doc not found" };
       }
       docsMap.delete(id);
-      syncToLocalStorage();
-      removeDocFromIDB(id);
+      pendingWrites.delete(id);
+      const storage = getRuckStorage();
+      if (storage?.delete) {
+        storage.delete(id).catch((err) => {
+          console.error(`[TodoNeoDB] Failed to delete ${id} from ruck.db:`, err);
+        });
+      } else if (storage?.remove) {
+        storage.remove(id).catch((err) => {
+          console.error(`[TodoNeoDB] Failed to delete ${id} from ruck.db:`, err);
+        });
+      }
       notifyDataChange("remove", { _id: id });
       return { ok: true, id };
     },
@@ -231,43 +246,59 @@
   var dbStorage = {
     getItem(key) {
       try {
-        const fullKey = `${STORAGE_PREFIX}${key}`;
-        const val = localStorage.getItem(fullKey);
-        if (val === null) {
-          const raw = localStorage.getItem(key);
-          if (raw === null) return null;
-          try {
-            return JSON.parse(raw);
-          } catch {
-            return raw;
+        if (storageMap.has(key)) {
+          return JSON.parse(JSON.stringify(storageMap.get(key)));
+        }
+        if (typeof localStorage !== "undefined") {
+          const raw = localStorage.getItem(`${LEGACY_STORAGE_PREFIX}${key}`) ?? localStorage.getItem(key);
+          if (raw !== null) {
+            try {
+              return JSON.parse(raw);
+            } catch {
+              return raw;
+            }
           }
         }
-        try {
-          return JSON.parse(val);
-        } catch {
-          return val;
-        }
+        return null;
       } catch (err) {
-        console.error("[TodoNeo] dbStorage.getItem failed:", err);
+        console.error("[TodoNeoDB] dbStorage.getItem failed:", err);
         return null;
       }
     },
     setItem(key, value) {
       try {
-        const fullKey = `${STORAGE_PREFIX}${key}`;
-        const serialized = typeof value === "string" ? JSON.stringify(value) : JSON.stringify(value);
-        localStorage.setItem(fullKey, serialized);
-        localStorage.setItem(key, serialized);
+        storageMap.set(key, value);
+        const storage = getRuckStorage();
+        if (storage?.set) {
+          storage.set(`${CONFIG_PREFIX}${key}`, value).catch((err) => {
+            console.error(`[TodoNeoDB] Failed to persist config ${key} to ruck.db:`, err);
+          });
+        }
+        if (typeof localStorage !== "undefined") {
+          const serialized = JSON.stringify(value);
+          localStorage.setItem(`${LEGACY_STORAGE_PREFIX}${key}`, serialized);
+        }
       } catch (err) {
-        console.error("[TodoNeo] dbStorage.setItem failed:", err);
+        console.error("[TodoNeoDB] dbStorage.setItem failed:", err);
       }
     },
     removeItem(key) {
       try {
-        localStorage.removeItem(`${STORAGE_PREFIX}${key}`);
-        localStorage.removeItem(key);
+        storageMap.delete(key);
+        const storage = getRuckStorage();
+        if (storage?.delete) {
+          storage.delete(`${CONFIG_PREFIX}${key}`).catch(() => {
+          });
+        } else if (storage?.remove) {
+          storage.remove(`${CONFIG_PREFIX}${key}`).catch(() => {
+          });
+        }
+        if (typeof localStorage !== "undefined") {
+          localStorage.removeItem(`${LEGACY_STORAGE_PREFIX}${key}`);
+          localStorage.removeItem(key);
+        }
       } catch (err) {
-        console.error("[TodoNeo] dbStorage.removeItem failed:", err);
+        console.error("[TodoNeoDB] dbStorage.removeItem failed:", err);
       }
     }
   };
@@ -469,7 +500,7 @@
     }
     return normalized;
   }
-  function dispatchPluginEnter(rawAction) {
+  async function dispatchPluginEnter(rawAction) {
     const normalized = normalizeAction(rawAction);
     const fingerprint = `${normalized.code}:${normalized.type}:${JSON.stringify(normalized.payload)}`;
     const now = Date.now();
@@ -485,9 +516,9 @@
       fallbackTimer = null;
     }
     try {
-      reloadFromStorage();
+      await initDatabase(true);
     } catch (err) {
-      console.error("[TodoNeo] reloadFromStorage error in dispatchPluginEnter:", err);
+      console.error("[TodoNeo] initDatabase error before dispatch:", err);
     }
     console.log(`[TodoNeo] dispatchPluginEnter: code="${normalized.code}", type="${normalized.type}", payload=`, normalized.payload);
     for (const listener of enterListeners) {
@@ -513,8 +544,8 @@
     hostEventsInstalled = true;
     const ruck = getRuck();
     if (typeof ruck?.onPluginEnter === "function") {
-      ruck.onPluginEnter((action) => {
-        dispatchPluginEnter(action);
+      ruck.onPluginEnter(async (action) => {
+        await dispatchPluginEnter(action);
       });
     }
     if (typeof ruck?.onPluginOut === "function") {

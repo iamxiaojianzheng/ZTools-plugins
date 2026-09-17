@@ -23,3 +23,4 @@ release/
 
 # everything 特殊排除
 !/plugins/everything/preload/node_modules
+/.agent/context

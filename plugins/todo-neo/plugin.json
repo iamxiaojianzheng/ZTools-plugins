@@ -13,7 +13,13 @@
   "development": {
     "main": "http://localhost:5173"
   },
-  "permissions": ["clipboard_write", "window_control"],
+  "permissions": [
+    "clipboard_write",
+    "window_control",
+    "storage_get",
+    "storage_put",
+    "storage_delete"
+  ],
   "features": [
     {
       "code": "todo",
@@ -25,6 +31,7 @@
       "code": "add",
       "explain": "添加到待办",
       "icon": "logo.png",
+      "mainPush": true,
       "cmds": [
         {
           "type": "regex",

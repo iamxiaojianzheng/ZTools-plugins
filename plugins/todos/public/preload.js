@@ -46,8 +46,311 @@
     }
   };
 
-  // src-compat/quick-add.js
+  // src-compat/database.js
   var STORAGE_KEY = "todos-data";
+  var WORKSPACE_CONFIG_KEY = "workspace-configs";
+  var TASKS_PREFIX = "todo-tasks/";
+  var CONFIG_PREFIX = "config:";
+  var LEGACY_STORAGE_PREFIX = "ruck_todos_db_";
+  var initPromise = null;
+  var lastKnownTaskIds = /* @__PURE__ */ new Set();
+  var storageMap = /* @__PURE__ */ new Map();
+  var lastLocalPersistTime = 0;
+  var pendingTaskWrites = /* @__PURE__ */ new Map();
+  function cleanupPendingWrites() {
+    const now = Date.now();
+    for (const [id, time] of pendingTaskWrites.entries()) {
+      if (now - time > 3e3) {
+        pendingTaskWrites.delete(id);
+      }
+    }
+  }
+  function getRuckStorage() {
+    if (typeof window !== "undefined" && window.ruck?.storage) {
+      return window.ruck.storage;
+    }
+    return null;
+  }
+  function getDefaultTodosData() {
+    return {
+      version: "1.0.0",
+      workspaces: { work: [], life: [], study: [] },
+      currentWorkspace: "work"
+    };
+  }
+  function getTodosData() {
+    try {
+      if (typeof localStorage === "undefined") return getDefaultTodosData();
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return getDefaultTodosData();
+      const parsed = JSON.parse(raw);
+      if (!parsed.workspaces) parsed.workspaces = { work: [], life: [], study: [] };
+      if (!parsed.currentWorkspace) parsed.currentWorkspace = "work";
+      return parsed;
+    } catch (e) {
+      console.error("[TodosDB] Failed to parse localStorage todos-data:", e);
+      return getDefaultTodosData();
+    }
+  }
+  function persistTodosData(data) {
+    if (!data || typeof data !== "object") return;
+    lastLocalPersistTime = Date.now();
+    if (data.workspaces) {
+      for (const wsKey of ["work", "life", "study"]) {
+        const list = Array.isArray(data.workspaces[wsKey]) ? data.workspaces[wsKey] : [];
+        for (const t of list) {
+          if (t && t.id) {
+            pendingTaskWrites.set(t.id, Date.now());
+          }
+        }
+      }
+    }
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      }
+    } catch (e) {
+      console.error("[TodosDB] Failed to save localStorage:", e);
+    }
+    const storage = getRuckStorage();
+    if (!storage) return;
+    if (storage.set) {
+      storage.set(STORAGE_KEY, data).catch((err) => {
+        console.error("[TodosDB] Failed to persist todos-data to ruck.db:", err);
+      });
+    }
+    try {
+      const currentTaskIds = /* @__PURE__ */ new Set();
+      const workspaces = data.workspaces || {};
+      for (const wsKey of ["work", "life", "study"]) {
+        const list = Array.isArray(workspaces[wsKey]) ? workspaces[wsKey] : [];
+        for (const task of list) {
+          if (task && task.id) {
+            currentTaskIds.add(task.id);
+            const taskDoc = {
+              ...task,
+              _workspace: wsKey,
+              _updated_at: Date.now()
+            };
+            if (storage.set) {
+              storage.set(`${TASKS_PREFIX}${task.id}`, taskDoc).catch(() => {
+              });
+            }
+          }
+        }
+      }
+      for (const oldId of lastKnownTaskIds) {
+        if (!currentTaskIds.has(oldId)) {
+          if (storage.delete) {
+            storage.delete(`${TASKS_PREFIX}${oldId}`).catch(() => {
+            });
+          } else if (storage.remove) {
+            storage.remove(`${TASKS_PREFIX}${oldId}`).catch(() => {
+            });
+          }
+        }
+      }
+      lastKnownTaskIds = currentTaskIds;
+    } catch (err) {
+      console.warn("[TodosDB] Failed to persist atom tasks:", err);
+    }
+  }
+  function migrateFromLegacyStorage(storage) {
+    try {
+      if (typeof localStorage === "undefined") return;
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.workspaces) {
+          console.log("[TodosDB] Migrating legacy todos-data to ruck.db...");
+          persistTodosData(parsed);
+        }
+      }
+      const cfgRaw = localStorage.getItem(WORKSPACE_CONFIG_KEY) || localStorage.getItem(`${LEGACY_STORAGE_PREFIX}${WORKSPACE_CONFIG_KEY}`);
+      if (cfgRaw && storage?.set) {
+        try {
+          const cfgs = JSON.parse(cfgRaw);
+          storage.set(WORKSPACE_CONFIG_KEY, cfgs).catch(() => {
+          });
+        } catch {
+          storage.set(WORKSPACE_CONFIG_KEY, cfgRaw).catch(() => {
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("[TodosDB] migrateFromLegacyStorage failed:", err);
+    }
+  }
+  async function initDatabase(forceRefresh = false) {
+    if (initPromise && !forceRefresh) return initPromise;
+    initPromise = (async () => {
+      const storage = getRuckStorage();
+      if (!storage) {
+        migrateFromLegacyStorage(null);
+        return;
+      }
+      try {
+        cleanupPendingWrites();
+        if (typeof storage.all === "function") {
+          const records = await storage.all();
+          if (Array.isArray(records) && records.length > 0) {
+            let foundTodosData = false;
+            for (const item of records) {
+              if (!item || !item.key) continue;
+              if (item.key === STORAGE_KEY) {
+                foundTodosData = true;
+                let data = item.value;
+                if (data && typeof data === "object") {
+                  const now = Date.now();
+                  if (now - lastLocalPersistTime < 2e3) {
+                    const localData = getTodosData();
+                    if (localData && localData.workspaces) {
+                      if (!data.workspaces) data.workspaces = {};
+                      for (const ws of ["work", "life", "study"]) {
+                        const localList = localData.workspaces[ws] || [];
+                        const remoteList = data.workspaces[ws] || [];
+                        const mergedMap = new Map(remoteList.map((t) => [t.id, t]));
+                        for (const lt of localList) {
+                          if (lt && lt.id) {
+                            const writeTime = pendingTaskWrites.get(lt.id);
+                            if (writeTime && now - writeTime < 2500) {
+                              mergedMap.set(lt.id, lt);
+                            }
+                          }
+                        }
+                        data.workspaces[ws] = Array.from(mergedMap.values());
+                      }
+                    }
+                  }
+                  if (typeof localStorage !== "undefined") {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                  }
+                  if (data.workspaces) {
+                    lastKnownTaskIds.clear();
+                    for (const ws of ["work", "life", "study"]) {
+                      const list = data.workspaces[ws] || [];
+                      list.forEach((t) => t?.id && lastKnownTaskIds.add(t.id));
+                    }
+                  }
+                }
+              } else if (item.key === WORKSPACE_CONFIG_KEY) {
+                if (typeof localStorage !== "undefined") {
+                  const str = typeof item.value === "string" ? item.value : JSON.stringify(item.value);
+                  localStorage.setItem(WORKSPACE_CONFIG_KEY, str);
+                  localStorage.setItem(`${LEGACY_STORAGE_PREFIX}${WORKSPACE_CONFIG_KEY}`, str);
+                }
+              } else if (item.key.startsWith(CONFIG_PREFIX)) {
+                const subKey = item.key.slice(CONFIG_PREFIX.length);
+                storageMap.set(subKey, item.value);
+              }
+            }
+            if (!foundTodosData) {
+              migrateFromLegacyStorage(storage);
+            }
+            console.log("[TodosDB] Successfully initialized data from ruck.db");
+          } else {
+            migrateFromLegacyStorage(storage);
+          }
+        } else {
+          migrateFromLegacyStorage(storage);
+        }
+      } catch (err) {
+        console.error("[TodosDB] initDatabase error:", err);
+        migrateFromLegacyStorage(storage);
+      }
+    })();
+    return initPromise;
+  }
+  if (typeof window !== "undefined") {
+    initDatabase();
+  }
+  var dbStorage = {
+    getItem(key) {
+      try {
+        if (key === WORKSPACE_CONFIG_KEY) {
+          const raw = localStorage.getItem(WORKSPACE_CONFIG_KEY) || localStorage.getItem(`${LEGACY_STORAGE_PREFIX}${WORKSPACE_CONFIG_KEY}`);
+          if (raw !== null) {
+            try {
+              return JSON.parse(raw);
+            } catch {
+              return raw;
+            }
+          }
+        }
+        if (storageMap.has(key)) {
+          return JSON.parse(JSON.stringify(storageMap.get(key)));
+        }
+        if (typeof localStorage !== "undefined") {
+          const raw = localStorage.getItem(`${LEGACY_STORAGE_PREFIX}${key}`) ?? localStorage.getItem(key);
+          if (raw !== null) {
+            try {
+              return JSON.parse(raw);
+            } catch {
+              return raw;
+            }
+          }
+        }
+        return null;
+      } catch (err) {
+        console.error("[TodosDB] dbStorage.getItem failed:", err);
+        return null;
+      }
+    },
+    setItem(key, value) {
+      try {
+        storageMap.set(key, value);
+        const storage = getRuckStorage();
+        if (key === WORKSPACE_CONFIG_KEY) {
+          if (storage?.set) {
+            storage.set(WORKSPACE_CONFIG_KEY, value).catch(() => {
+            });
+          }
+          if (typeof localStorage !== "undefined") {
+            const str = typeof value === "string" ? value : JSON.stringify(value);
+            localStorage.setItem(WORKSPACE_CONFIG_KEY, str);
+            localStorage.setItem(`${LEGACY_STORAGE_PREFIX}${WORKSPACE_CONFIG_KEY}`, str);
+          }
+        } else {
+          if (storage?.set) {
+            storage.set(`${CONFIG_PREFIX}${key}`, value).catch(() => {
+            });
+          }
+          if (typeof localStorage !== "undefined") {
+            const str = typeof value === "string" ? value : JSON.stringify(value);
+            localStorage.setItem(`${LEGACY_STORAGE_PREFIX}${key}`, str);
+            localStorage.setItem(key, str);
+          }
+        }
+      } catch (err) {
+        console.error("[TodosDB] dbStorage.setItem failed:", err);
+      }
+    },
+    removeItem(key) {
+      try {
+        storageMap.delete(key);
+        const storage = getRuckStorage();
+        if (key === WORKSPACE_CONFIG_KEY) {
+          if (storage?.delete) storage.delete(WORKSPACE_CONFIG_KEY).catch(() => {
+          });
+          if (typeof localStorage !== "undefined") {
+            localStorage.removeItem(WORKSPACE_CONFIG_KEY);
+            localStorage.removeItem(`${LEGACY_STORAGE_PREFIX}${WORKSPACE_CONFIG_KEY}`);
+          }
+        } else {
+          if (storage?.delete) storage.delete(`${CONFIG_PREFIX}${key}`).catch(() => {
+          });
+          if (typeof localStorage !== "undefined") {
+            localStorage.removeItem(`${LEGACY_STORAGE_PREFIX}${key}`);
+            localStorage.removeItem(key);
+          }
+        }
+      } catch (err) {
+        console.error("[TodosDB] dbStorage.removeItem failed:", err);
+      }
+    }
+  };
+
+  // src-compat/quick-add.js
   function formatDate(date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -64,38 +367,10 @@
     return String(text).replace(/^(todo|待办|\+)\s*/i, "").trim();
   }
   function getStorageData() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        return {
-          version: "1.0.0",
-          workspaces: { work: [], life: [], study: [] },
-          currentWorkspace: "work"
-        };
-      }
-      const parsed = JSON.parse(raw);
-      if (!parsed.workspaces) {
-        parsed.workspaces = { work: [], life: [], study: [] };
-      }
-      if (!parsed.currentWorkspace) {
-        parsed.currentWorkspace = "work";
-      }
-      return parsed;
-    } catch (e) {
-      console.error("[TodosQuickAdd] Failed to parse localStorage data:", e);
-      return {
-        version: "1.0.0",
-        workspaces: { work: [], life: [], study: [] },
-        currentWorkspace: "work"
-      };
-    }
+    return getTodosData();
   }
   function saveStorageData(data) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (e) {
-      console.error("[TodosQuickAdd] Failed to save localStorage data:", e);
-    }
+    persistTodosData(data);
   }
   function quickAddTask(rawTitle, bridge, notify = true) {
     const title = stripPrefix(rawTitle);
@@ -227,7 +502,6 @@
   }
 
   // src-compat/ztools.js
-  var STORAGE_PREFIX = "ruck_todos_db_";
   function getRuck() {
     return typeof window !== "undefined" && window.ruck ? window.ruck : null;
   }
@@ -255,7 +529,7 @@
     return normalized;
   }
   var currentBridgeInstance = null;
-  function dispatchPluginEnter(rawAction) {
+  async function dispatchPluginEnter(rawAction) {
     const normalized = normalizeAction(rawAction);
     const fingerprint = `${normalized.code}:${normalized.type}:${JSON.stringify(normalized.payload)}`;
     const now = Date.now();
@@ -269,6 +543,11 @@
     if (fallbackTimer) {
       clearTimeout(fallbackTimer);
       fallbackTimer = null;
+    }
+    try {
+      await initDatabase(true);
+    } catch (err) {
+      console.warn("[Todos] initDatabase refresh error on enter:", err);
     }
     console.log(`[Todos] dispatchPluginEnter: code="${normalized.code}", type="${normalized.type}"`);
     if (normalized.code === "add" && normalized.payload) {
@@ -302,13 +581,25 @@
     hostEventsInstalled = true;
     const ruck = getRuck();
     if (typeof ruck?.onPluginEnter === "function") {
-      ruck.onPluginEnter((action) => {
-        dispatchPluginEnter(action);
+      ruck.onPluginEnter(async (action) => {
+        await dispatchPluginEnter(action);
       });
     }
     if (typeof ruck?.onPluginOut === "function") {
       ruck.onPluginOut((exit) => {
         dispatchPluginOut(exit);
+      });
+    }
+    if (typeof document !== "undefined" && document.addEventListener) {
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          initDatabase(true);
+        }
+      });
+    }
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("focus", () => {
+        initDatabase(true);
       });
     }
     fallbackTimer = setTimeout(() => {
@@ -320,39 +611,6 @@
   }
   function createZtoolsBridge() {
     setupHostEventListeners();
-    const dbStorage = {
-      getItem(key) {
-        try {
-          const fullKey = `${STORAGE_PREFIX}${key}`;
-          const val = localStorage.getItem(fullKey);
-          if (val === null) {
-            return localStorage.getItem(key);
-          }
-          return val;
-        } catch (err) {
-          console.error("[Todos] dbStorage.getItem failed:", err);
-          return null;
-        }
-      },
-      setItem(key, value) {
-        try {
-          const fullKey = `${STORAGE_PREFIX}${key}`;
-          const strVal = typeof value === "string" ? value : JSON.stringify(value);
-          localStorage.setItem(fullKey, strVal);
-          localStorage.setItem(key, strVal);
-        } catch (err) {
-          console.error("[Todos] dbStorage.setItem failed:", err);
-        }
-      },
-      removeItem(key) {
-        try {
-          localStorage.removeItem(`${STORAGE_PREFIX}${key}`);
-          localStorage.removeItem(key);
-        } catch (err) {
-          console.error("[Todos] dbStorage.removeItem failed:", err);
-        }
-      }
-    };
     const bridge = {
       dbStorage,
       isDarkColors() {
@@ -494,6 +752,24 @@
     window.utools = bridge;
     window.services = services;
     setupQuickAddEngine(bridge);
+    try {
+      if (typeof localStorage !== "undefined") {
+        const originalSetItem = localStorage.setItem.bind(localStorage);
+        localStorage.setItem = function(key, value) {
+          originalSetItem(key, value);
+          if (key === "todos-data") {
+            try {
+              const parsed = JSON.parse(value);
+              persistTodosData(parsed);
+            } catch (err) {
+              console.warn("[Todos] Failed to auto-persist todos-data:", err);
+            }
+          }
+        };
+      }
+    } catch (e) {
+      console.warn("[Todos] Failed to setup localStorage hook:", e);
+    }
     window.addEventListener("keydown", handleGlobalKeyDown, true);
     document.addEventListener("keydown", handleGlobalKeyDown, true);
     console.log("[Todos] Ruck compatibility layer successfully mounted.");
