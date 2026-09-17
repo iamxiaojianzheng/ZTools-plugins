@@ -1,11 +1,12 @@
 {
-  "name": "otp-2fa",
+  "name": "@ruck-plugins/otp-2fa",
   "version": "1.0.0",
   "description": "安全、简约且高效的 2FA 令牌管理器，支持 TOTP/HOTP/Steam 多种协议。",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build"
+    "build:compat": "node build-compat.js",
+    "build": "node build-compat.js && vite build"
   },
   "dependencies": {
     "pinyin-pro": "^3.28.0",
