@@ -67,6 +67,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveWorkspaceConfigs(state.workspaceConfigs);
   }, [state.workspaceConfigs]);
 
+  // 监听外部快捷添加任务（如来自 onMainPush 搜索框或超级面板）
+  useEffect(() => {
+    const handleExternalTaskAdded = (event: Event) => {
+      const customEvent = event as CustomEvent<{ workspace: Workspace; task: any }>;
+      if (customEvent.detail && customEvent.detail.task) {
+        const { workspace, task } = customEvent.detail;
+        const targetWorkspace = workspace || state.currentWorkspace;
+        dispatch({
+          type: 'ADD_TASK',
+          payload: { workspace: targetWorkspace, task }
+        });
+      }
+    };
+
+    window.addEventListener('todos-external-task-added', handleExternalTaskAdded);
+    return () => {
+      window.removeEventListener('todos-external-task-added', handleExternalTaskAdded);
+    };
+  }, [state.currentWorkspace]);
+
   return (
     <AppContext.Provider value={{ state, dispatch }}>
       {children}
