@@ -1,6 +1,6 @@
 {
   "name": "@ruck-plugins/todo-neo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "快速记录和查看待办事项，支持 vim 键位操作",
   "type": "module",
   "scripts": {

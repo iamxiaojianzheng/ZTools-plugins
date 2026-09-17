@@ -5,7 +5,7 @@
   "title": "Todo",
   "description": "Vim-like 的 todo 工具",
   "author": "thetree",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "ai": true,
   "main": "index.html",
   "preload": "preload.js",
@@ -25,7 +25,9 @@
       "code": "todo",
       "explain": "创建/查看/调整所有待办事项",
       "icon": "logo.png",
-      "cmds": ["ToDo 待办"]
+      "cmds": [
+        "ToDo 待办"
+      ]
     },
     {
       "code": "add",
@@ -153,7 +155,9 @@
             "description": "结束日期，格式：2025-12-31（可选）"
           }
         },
-        "required": ["content"]
+        "required": [
+          "content"
+        ]
       },
       "outputSchema": {
         "type": "object",
@@ -215,7 +219,10 @@
             }
           }
         },
-        "required": ["id", "patch"]
+        "required": [
+          "id",
+          "patch"
+        ]
       },
       "outputSchema": {
         "type": "object",
@@ -242,5 +249,9 @@
       }
     }
   },
-  "platform": ["darwin", "win32", "linux"]
+  "platform": [
+    "darwin",
+    "win32",
+    "linux"
+  ]
 }
