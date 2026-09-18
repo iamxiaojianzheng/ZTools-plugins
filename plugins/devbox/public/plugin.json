@@ -3,14 +3,20 @@
   "name": "@ruck-plugins/devbox",
   "pluginType": "ui",
   "title": "开发百宝箱",
-  "categories": ["development"],
+  "categories": [
+    "development"
+  ],
   "description": "开发百宝箱，提供随机生成、Base64 编解码、URL 编解码、加密签名、二维码、文本压缩、文本转换、JSON 工具、开发辅助等常用工具集",
   "author": "咖啡八杯",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.html",
   "preload": "preload.js",
   "logo": "logo.png",
-  "permissions": ["clipboard_read", "clipboard_write", "window_control"],
+  "permissions": [
+    "clipboard_read",
+    "clipboard_write",
+    "window_control"
+  ],
   "development": {
     "main": "http://localhost:5173"
   },
@@ -33,7 +39,14 @@
       "code": "password",
       "explain": "随机生成安全密码，可配置长度、字符集，实时显示密码强度",
       "icon": "logo.png",
-      "cmds": ["密码", "随机密码", "password", "生成密码", "口令", "pass"]
+      "cmds": [
+        "密码",
+        "随机密码",
+        "password",
+        "生成密码",
+        "口令",
+        "pass"
+      ]
     },
     {
       "code": "number",
@@ -52,13 +65,27 @@
       "code": "uuid",
       "explain": "随机生成符合 v4 规范的 UUID，支持批量生成和一键复制",
       "icon": "logo.png",
-      "cmds": ["uuid", "UUID", "唯一标识", "生成uuid", "guid"]
+      "cmds": [
+        "uuid",
+        "UUID",
+        "唯一标识",
+        "生成uuid",
+        "guid"
+      ]
     },
     {
       "code": "color",
       "explain": "通过 HSL 滑块调色或随机生成颜色，支持 HEX/RGB/HSL 多格式复制",
       "icon": "logo.png",
-      "cmds": ["随机颜色", "颜色", "color", "生成颜色", "调色", "配色", "色值"]
+      "cmds": [
+        "随机颜色",
+        "颜色",
+        "color",
+        "生成颜色",
+        "调色",
+        "配色",
+        "色值"
+      ]
     },
     {
       "code": "signature",
