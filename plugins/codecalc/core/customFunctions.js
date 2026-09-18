@@ -217,7 +217,8 @@ function updateCustomFromStorage(calculator, FUNCTIONS, CONSTANTS) {
     try {
         const storage = typeof window !== 'undefined' && window.ztools?.dbStorage
             ? window.ztools.dbStorage
-            : localStorage;
+            : (typeof localStorage !== 'undefined' ? localStorage : null);
+        if (!storage || typeof storage.getItem !== 'function') return;
         const saved = JSON.parse(storage.getItem('customFunctions') || '{}');
         for (const name of Object.keys(saved)) {
             const data = saved[name];

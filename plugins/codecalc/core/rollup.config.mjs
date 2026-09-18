@@ -23,7 +23,7 @@ export default [
     output: [
       {
         file: path.join(appDir, 'src', 'calculator.min.js'),
-        format: 'iife',
+        format: 'umd',
         name: 'CodeCalcCore',
         sourcemap: false
       },
@@ -34,11 +34,21 @@ export default [
       },
       {
         file: path.join(testDir, 'calculator.min.js'),
-        format: 'iife',
+        format: 'umd',
         name: 'CodeCalcCore',
         sourcemap: false
       }
     ],
+    plugins: sharedPlugins
+  },
+  {
+    input: path.join(appDir, 'src', 'preload.js'),
+    output: {
+      file: path.join(appDir, 'preload.js'),
+      format: 'iife',
+      name: 'CodeCalcPreload',
+      sourcemap: false
+    },
     plugins: sharedPlugins
   },
   {

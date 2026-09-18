@@ -1,14 +1,14 @@
 import {
     isDarkColors,
     isZtoolsEnv,
-    onMainPush,
     onPluginEnter,
     onPluginOut,
     onThemeChange,
+    outPlugin,
     pasteText
 } from './host.js';
 
-const Calculator = window.CodeCalcCore.Calculator;
+const Calculator = window.CodeCalcCore?.Calculator || null;
 let hasHandledPluginOut = false;
 
 function isBase64(str) {
@@ -17,7 +17,7 @@ function isBase64(str) {
 }
 
 function handleRegexInput(code, payload) {
-    let expr = payload.trim();
+    let expr = String(payload || '').trim();
 
     if (code === 'quickcalc') {
         if (isBase64(expr)) {
@@ -67,25 +67,63 @@ onThemeChange((matches) => {
     setTheme(matches);
 });
 
+// Escape 全局退出治理: 仅在非编辑状态、输入框为空且未打开任何弹窗时触发 outPlugin
+function isAnyModalVisible() {
+    return Boolean(
+        window.settings?.isPanelVisible ||
+        window.shortcuts?.isPanelVisible ||
+        window.snapshot?.isPanelVisible ||
+        window.customFunctions?.isPanelVisible
+    );
+}
+
+function handleGlobalEscape(event) {
+    if (event.key !== 'Escape' && event.code !== 'Escape') return;
+
+    // 若有模态面板开启，由面板自身的 Escape 事件关闭
+    if (isAnyModalVisible()) return;
+
+    // 若当前输入框中有非空内容，不直接关闭，方便用户清空或编辑
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        if (activeEl.value && activeEl.value.trim() !== '') {
+            return;
+        }
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    outPlugin();
+}
+
+window.addEventListener('keydown', handleGlobalEscape, true);
+document.addEventListener('keydown', handleGlobalEscape, true);
+
 if (isZtoolsEnv) {
-    onPluginEnter(({ code, type, payload }) => {
+    onPluginEnter((action = {}) => {
+        const code = action.code || '';
+        const type = action.type || 'text';
+        const payload = action.payload || '';
+
         const inputs = document.querySelectorAll('.input');
         const lastInput = inputs[inputs.length - 1];
 
         if (type === 'regex') {
             const expr = handleRegexInput(code, payload);
 
-            if (lastInput.value.trim() !== '') {
+            if (lastInput && lastInput.value.trim() !== '') {
                 addNewLine();
                 const newInputs = document.querySelectorAll('.input');
                 const newLastInput = newInputs[newInputs.length - 1];
-                newLastInput.value = expr;
-                newLastInput.dispatchEvent(new Event('input'));
-            } else {
+                if (newLastInput) {
+                    newLastInput.value = expr;
+                    newLastInput.dispatchEvent(new Event('input'));
+                }
+            } else if (lastInput) {
                 lastInput.value = expr;
                 lastInput.dispatchEvent(new Event('input'));
             }
-        } else {
+        } else if (lastInput) {
             lastInput.focus();
         }
     });
@@ -93,36 +131,4 @@ if (isZtoolsEnv) {
     onPluginOut((processExited) => {
         handlePluginOut(processExited);
     });
-
-    onMainPush(
-        ({ code, type, payload }) => {
-            if (type === 'regex') {
-                let value = '';
-                const expr = handleRegexInput(code, payload);
-                let title = '点击复制结果';
-
-                try {
-                    const rslt = Calculator.calculate(expr);
-                    value = rslt.value;
-                    if (code === 'timestamp') {
-                        title = rslt.info;
-                    }
-                } catch (error) {
-                    value = 'error: ' + error.message;
-                }
-
-                return [
-                    {
-                        icon: 'logo-equal.png',
-                        text: value.toString(),
-                        title
-                    }
-                ];
-            }
-        },
-        ({ option }) => {
-            void pasteText(option?.text);
-            return false;
-        }
-    );
 }
