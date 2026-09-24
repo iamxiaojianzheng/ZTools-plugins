@@ -49,7 +49,6 @@
   // src-compat/database.js
   var STORAGE_KEY = "todos-data";
   var WORKSPACE_CONFIG_KEY = "workspace-configs";
-  var TASKS_PREFIX = "todo-tasks/";
   var CONFIG_PREFIX = "config:";
   var LEGACY_STORAGE_PREFIX = "ruck_todos_db_";
   var initPromise = null;
@@ -92,6 +91,9 @@
       return getDefaultTodosData();
     }
   }
+  var persistDebounceTimer = null;
+  var pendingPersistData = null;
+  var isPersisting = false;
   function persistTodosData(data) {
     if (!data || typeof data !== "object") return;
     lastLocalPersistTime = Date.now();
@@ -105,55 +107,36 @@
         }
       }
     }
-    try {
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    if (!isPersisting) {
+      isPersisting = true;
+      try {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        }
+      } catch (e) {
+        console.error("[TodosDB] Failed to save localStorage:", e);
+      } finally {
+        isPersisting = false;
       }
-    } catch (e) {
-      console.error("[TodosDB] Failed to save localStorage:", e);
     }
-    const storage = getRuckStorage();
-    if (!storage) return;
-    if (storage.set) {
-      storage.set(STORAGE_KEY, data).catch((err) => {
-        console.error("[TodosDB] Failed to persist todos-data to ruck.db:", err);
-      });
+    pendingPersistData = data;
+    if (persistDebounceTimer) {
+      clearTimeout(persistDebounceTimer);
     }
-    try {
-      const currentTaskIds = /* @__PURE__ */ new Set();
-      const workspaces = data.workspaces || {};
-      for (const wsKey of ["work", "life", "study"]) {
-        const list = Array.isArray(workspaces[wsKey]) ? workspaces[wsKey] : [];
-        for (const task of list) {
-          if (task && task.id) {
-            currentTaskIds.add(task.id);
-            const taskDoc = {
-              ...task,
-              _workspace: wsKey,
-              _updated_at: Date.now()
-            };
-            if (storage.set) {
-              storage.set(`${TASKS_PREFIX}${task.id}`, taskDoc).catch(() => {
-              });
-            }
-          }
+    persistDebounceTimer = setTimeout(async () => {
+      const dataToSave = pendingPersistData;
+      pendingPersistData = null;
+      persistDebounceTimer = null;
+      const storage = getRuckStorage();
+      if (!storage || !dataToSave) return;
+      if (storage.set) {
+        try {
+          await storage.set(STORAGE_KEY, dataToSave);
+        } catch (err) {
+          console.error("[TodosDB] Failed to persist todos-data to ruck.db:", err);
         }
       }
-      for (const oldId of lastKnownTaskIds) {
-        if (!currentTaskIds.has(oldId)) {
-          if (storage.delete) {
-            storage.delete(`${TASKS_PREFIX}${oldId}`).catch(() => {
-            });
-          } else if (storage.remove) {
-            storage.remove(`${TASKS_PREFIX}${oldId}`).catch(() => {
-            });
-          }
-        }
-      }
-      lastKnownTaskIds = currentTaskIds;
-    } catch (err) {
-      console.warn("[TodosDB] Failed to persist atom tasks:", err);
-    }
+    }, 150);
   }
   function migrateFromLegacyStorage(storage) {
     try {

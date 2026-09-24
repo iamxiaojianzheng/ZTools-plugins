@@ -70,6 +70,10 @@ export function getTodosData() {
   }
 }
 
+let persistDebounceTimer = null;
+let pendingPersistData = null;
+let isPersisting = false;
+
 /**
  * 持久化 todos 数据至 localStorage 及 Ruck 原生 SQLite
  * @param {object} data 全量 todos-data 对象
@@ -89,63 +93,43 @@ export function persistTodosData(data) {
     }
   }
 
-  // 1. 同步保存至 localStorage 保障前端 React 0ms 同步读取
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  // 1. 同步保存至 localStorage 保障前端 React 0ms 同步读取（加锁防止循环触发 hook）
+  if (!isPersisting) {
+    isPersisting = true;
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      }
+    } catch (e) {
+      console.error("[TodosDB] Failed to save localStorage:", e);
+    } finally {
+      isPersisting = false;
     }
-  } catch (e) {
-    console.error("[TodosDB] Failed to save localStorage:", e);
   }
 
-  // 2. 异步直存 Ruck 原生 SQLite ruck.db
-  const storage = getRuckStorage();
-  if (!storage) return;
-
-  // 2.1 保存全量工作空间快照
-  if (storage.set) {
-    storage.set(STORAGE_KEY, data).catch((err) => {
-      console.error("[TodosDB] Failed to persist todos-data to ruck.db:", err);
-    });
+  // 2. 异步直存 Ruck 原生 SQLite ruck.db (带 150ms 防抖合并，杜绝消息队列超限)
+  pendingPersistData = data;
+  if (persistDebounceTimer) {
+    clearTimeout(persistDebounceTimer);
   }
 
-  // 2.2 拆分写入原子 task 条目，便于直接在数据库中检索
-  try {
-    const currentTaskIds = new Set();
-    const workspaces = data.workspaces || {};
+  persistDebounceTimer = setTimeout(async () => {
+    const dataToSave = pendingPersistData;
+    pendingPersistData = null;
+    persistDebounceTimer = null;
 
-    for (const wsKey of ["work", "life", "study"]) {
-      const list = Array.isArray(workspaces[wsKey]) ? workspaces[wsKey] : [];
-      for (const task of list) {
-        if (task && task.id) {
-          currentTaskIds.add(task.id);
-          const taskDoc = {
-            ...task,
-            _workspace: wsKey,
-            _updated_at: Date.now()
-          };
-          if (storage.set) {
-            storage.set(`${TASKS_PREFIX}${task.id}`, taskDoc).catch(() => {});
-          }
-        }
+    const storage = getRuckStorage();
+    if (!storage || !dataToSave) return;
+
+    // 保存全量工作空间快照 (单次原子写入，轻量高效)
+    if (storage.set) {
+      try {
+        await storage.set(STORAGE_KEY, dataToSave);
+      } catch (err) {
+        console.error("[TodosDB] Failed to persist todos-data to ruck.db:", err);
       }
     }
-
-    // 物理清理已在当前数据中删除的任务条目
-    for (const oldId of lastKnownTaskIds) {
-      if (!currentTaskIds.has(oldId)) {
-        if (storage.delete) {
-          storage.delete(`${TASKS_PREFIX}${oldId}`).catch(() => {});
-        } else if (storage.remove) {
-          storage.remove(`${TASKS_PREFIX}${oldId}`).catch(() => {});
-        }
-      }
-    }
-
-    lastKnownTaskIds = currentTaskIds;
-  } catch (err) {
-    console.warn("[TodosDB] Failed to persist atom tasks:", err);
-  }
+  }, 150);
 }
 
 /**
