@@ -1,0 +1,5 @@
+src-compat/
+build.js
+.git
+node_modules/
+*.log

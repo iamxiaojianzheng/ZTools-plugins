@@ -1,8 +1,10 @@
 {
-  "name": "wifi-export-tool",
-  "version": "1.0.0",
-  "description": "ZTools 插件 - 查看 Windows/Mac/Linux 设备上保存的所有 WiFi 网络名称及密码",
+  "name": "@ruck-plugins/wifi-export-tool",
+  "version": "1.0.3",
+  "type": "module",
+  "description": "ZTools / Ruck 插件 - 查看 Windows/Mac/Linux 设备上保存的所有 WiFi 网络名称及密码",
   "scripts": {
+    "build": "node build.js",
     "build-zip": "node build-zip.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
