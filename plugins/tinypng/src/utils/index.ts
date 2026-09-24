@@ -1,5 +1,12 @@
 export function toFileUrl(filePath: string) {
-  return 'file:///' + filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!filePath) return '';
+  const cleanPath = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  const isRuck = typeof window !== 'undefined' && (Boolean((window as any).ruck) || !(window as any).process?.versions?.electron);
+  if (isRuck) {
+    const isWin = typeof navigator !== 'undefined' && /win/i.test(navigator.platform || navigator.userAgent);
+    return isWin ? `http://asset.localhost/${cleanPath}` : `asset://localhost/${cleanPath}`;
+  }
+  return 'file:///' + cleanPath;
 }
 
 export function bytes(bytes: number) {

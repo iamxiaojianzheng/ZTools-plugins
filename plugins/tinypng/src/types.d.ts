@@ -1,7 +1,7 @@
 interface Services {
   handlePluginEnter(action: { code: string; type: string; payload: any }): Promise<void>
-  readFile(path: string): Promise<Buffer>
-  writeFile(path: string, data: ArrayBuffer): Promise<void>
+  readFile(path: string): Promise<Buffer | Uint8Array>
+  writeFile(path: string, data: ArrayBuffer | Uint8Array): Promise<void>
   readDir(path: string): Promise<string[]>
   replaceFiles(files: [string, string][]): Promise<void>
 }

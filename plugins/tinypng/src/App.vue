@@ -80,14 +80,15 @@ function handleDrop(e: DragEvent) {
   draged.value = false;
   const files = Array.from(e.dataTransfer?.files || []);
   // @ts-ignore
-  const paths = files.map(f => window.ztools.getPathForFile(f)).filter(Boolean);
+  const paths = files.map(f => (f as any).path || window.ztools?.getPathForFile?.(f)).filter(Boolean);
   if (paths.length > 0) {
-    window.services!.handlePluginEnter({ code: 'drop', type: 'drop', payload: paths.map(p => ({ path: p })) });
+    window.services?.handlePluginEnter({ code: 'drop', type: 'drop', payload: paths.map(p => ({ path: p })) });
   }
 }
 
 onMounted(() => {
   window.addEventListener('tinyping-compression', handleTinypingCompression);
+  window.dispatchEvent(new CustomEvent('tinyping-compression-ready'));
 });
 
 onUnmounted(() => {
