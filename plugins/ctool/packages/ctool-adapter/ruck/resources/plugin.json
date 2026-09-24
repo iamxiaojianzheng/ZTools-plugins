@@ -1,0 +1,21 @@
+{
+  "name": "@ruck-plugins/ctool",
+  "pluginType": "ui",
+  "title": "Ctool",
+  "displayName": "Ctool 程序开发常用工具",
+  "version": "##version##",
+  "description": "程序开发常用工具（哈希/加密/解密/JSON/正则/时间戳/编解码/二维码等30+款高频工具）",
+  "author": "baiy",
+  "homepage": "https://ctool.dev",
+  "main": "tool.html",
+  "logo": "logo.png",
+  "permissions": [
+    "clipboard_read",
+    "clipboard_write",
+    "storage_get",
+    "storage_put",
+    "storage_delete",
+    "window_control"
+  ],
+  "features": "##features##"
+}

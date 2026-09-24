@@ -1,0 +1,478 @@
+{
+    "name": "@ruck-plugins/ctool",
+    "pluginType": "ui",
+    "title": "Ctool",
+    "version": "2.4.0",
+    "description": "程序开发常用工具（哈希/加密/解密/JSON/正则/时间戳/编解码/二维码等30+款高频工具）",
+    "author": "baiy",
+    "homepage": "https://ctool.dev",
+    "main": "tool.html",
+    "logo": "logo.png",
+    "permissions": [
+        "clipboard_read",
+        "clipboard_write",
+        "storage_get",
+        "storage_put",
+        "storage_delete",
+        "window_control"
+    ],
+    "features": [
+        {
+            "code": "ctool",
+            "explain": "Ctool - 程序开发常用工具箱",
+            "cmds": ["ctool", "开发工具", "工具箱", "常用工具", "devtools"]
+        },
+        {
+            "code": "ctool-hash-hash",
+            "explain": "哈希(hash)",
+            "cmds": [
+                "hash",
+                "哈希(hash)",
+                "ctool-hash",
+                "哈希(hash)哈希(hash)",
+                "md5",
+                "sha1",
+                "sha256",
+                "sha512",
+                "sm3"
+            ]
+        },
+        {
+            "code": "ctool-aes-encrypt",
+            "explain": "AES - 加密",
+            "cmds": ["aes", "encrypt", "加密", "ctool-aes-encrypt", "aes加密"]
+        },
+        {
+            "code": "ctool-aes-decrypt",
+            "explain": "AES - 解密",
+            "cmds": ["aes", "decrypt", "解密", "ctool-aes-decrypt", "aes解密"]
+        },
+        {
+            "code": "ctool-des-encrypt",
+            "explain": "DES - 加密",
+            "cmds": ["des", "encrypt", "加密", "ctool-des-encrypt", "des加密"]
+        },
+        {
+            "code": "ctool-des-decrypt",
+            "explain": "DES - 解密",
+            "cmds": ["des", "decrypt", "解密", "ctool-des-decrypt", "des解密"]
+        },
+        {
+            "code": "ctool-tripleDes-encrypt",
+            "explain": "Triple DES - 加密",
+            "cmds": ["tripledes", "encrypt", "triple des", "加密", "ctool-tripledes-encrypt", "triple des加密"]
+        },
+        {
+            "code": "ctool-tripleDes-decrypt",
+            "explain": "Triple DES - 解密",
+            "cmds": ["tripledes", "decrypt", "triple des", "解密", "ctool-tripledes-decrypt", "triple des解密"]
+        },
+        {
+            "code": "ctool-rc4-encrypt",
+            "explain": "RC4 - 加密",
+            "cmds": ["rc4", "encrypt", "加密", "ctool-rc4-encrypt", "rc4加密"]
+        },
+        {
+            "code": "ctool-rc4-decrypt",
+            "explain": "RC4 - 解密",
+            "cmds": ["rc4", "decrypt", "解密", "ctool-rc4-decrypt", "rc4解密"]
+        },
+        {
+            "code": "ctool-rabbit-encrypt",
+            "explain": "Rabbit - 加密",
+            "cmds": ["rabbit", "encrypt", "加密", "ctool-rabbit-encrypt", "rabbit加密"]
+        },
+        {
+            "code": "ctool-rabbit-decrypt",
+            "explain": "Rabbit - 解密",
+            "cmds": ["rabbit", "decrypt", "解密", "ctool-rabbit-decrypt", "rabbit解密"]
+        },
+        {
+            "code": "ctool-sm2-encrypt",
+            "explain": "SM2 - 加密",
+            "cmds": ["sm2", "encrypt", "加密", "ctool-sm2-encrypt", "sm2加密"]
+        },
+        {
+            "code": "ctool-sm2-decrypt",
+            "explain": "SM2 - 解密",
+            "cmds": ["sm2", "decrypt", "解密", "ctool-sm2-decrypt", "sm2解密"]
+        },
+        {
+            "code": "ctool-sm2-sign",
+            "explain": "SM2 - 签名",
+            "cmds": ["sm2", "sign", "签名", "ctool-sm2-sign", "sm2签名"]
+        },
+        {
+            "code": "ctool-sm2-verify",
+            "explain": "SM2 - 验签",
+            "cmds": ["sm2", "verify", "验签", "ctool-sm2-verify", "sm2验签"]
+        },
+        {
+            "code": "ctool-sm4-encrypt",
+            "explain": "SM4 - 加密",
+            "cmds": ["sm4", "encrypt", "加密", "ctool-sm4-encrypt", "sm4加密"]
+        },
+        {
+            "code": "ctool-sm4-decrypt",
+            "explain": "SM4 - 解密",
+            "cmds": ["sm4", "decrypt", "解密", "ctool-sm4-decrypt", "sm4解密"]
+        },
+        {
+            "code": "ctool-rsa-encrypt",
+            "explain": "RSA - 加密",
+            "cmds": ["rsa", "encrypt", "加密", "ctool-rsa-encrypt", "rsa加密"]
+        },
+        {
+            "code": "ctool-rsa-decrypt",
+            "explain": "RSA - 解密",
+            "cmds": ["rsa", "decrypt", "解密", "ctool-rsa-decrypt", "rsa解密"]
+        },
+        {
+            "code": "ctool-sign-sign",
+            "explain": "签名/验签",
+            "cmds": ["sign", "签名/验签", "ctool-sign", "签名/验签签名/验签"]
+        },
+        {
+            "code": "ctool-base64-encoder",
+            "explain": "Base64 - 编码",
+            "cmds": ["base64", "encoder", "编码", "ctool-base64-encoder", "base64编码"]
+        },
+        {
+            "code": "ctool-base64-decoder",
+            "explain": "Base64 - 解码",
+            "cmds": ["base64", "decoder", "解码", "ctool-base64-decoder", "base64解码"]
+        },
+        {
+            "code": "ctool-json-json",
+            "explain": "JSON工具",
+            "cmds": ["json", "json工具", "ctool-json", "json工具json工具"]
+        },
+        {
+            "code": "ctool-url-encoder",
+            "explain": "URL编码 - 编码",
+            "cmds": ["url", "encoder", "url编码", "编码", "ctool-url-encoder", "url编码编码"]
+        },
+        {
+            "code": "ctool-url-decoder",
+            "explain": "URL编码 - 解码",
+            "cmds": ["url", "decoder", "url编码", "解码", "ctool-url-decoder", "url编码解码"]
+        },
+        {
+            "code": "ctool-qrCode-generate",
+            "explain": "二维码 - 生成",
+            "cmds": ["qrcode", "generate", "二维码", "生成", "ctool-qrcode-generate", "二维码生成"]
+        },
+        {
+            "code": "ctool-qrCode-parse",
+            "explain": "二维码 - 解析",
+            "cmds": ["qrcode", "parse", "二维码", "解析", "ctool-qrcode-parse", "二维码解析"]
+        },
+        {
+            "code": "ctool-barcode-barcode",
+            "explain": "条形码",
+            "cmds": ["barcode", "条形码", "ctool-barcode", "条形码条形码"]
+        },
+        {
+            "code": "ctool-pinyin-pinyin",
+            "explain": "汉字转拼音",
+            "cmds": ["pinyin", "汉字转拼音", "ctool-pinyin", "汉字转拼音汉字转拼音"]
+        },
+        {
+            "code": "ctool-ip-ip",
+            "explain": "IP地址查询",
+            "cmds": ["ip", "ip地址查询", "ctool-ip", "ip地址查询ip地址查询"]
+        },
+        {
+            "code": "ctool-code-code",
+            "explain": "代码 - 格式化",
+            "cmds": [
+                "code",
+                "代码",
+                "格式化",
+                "ctool-code-code",
+                "代码格式化",
+                "js",
+                "javascript",
+                "markdown",
+                "typescript",
+                "css",
+                "less",
+                "scss",
+                "yaml",
+                "html",
+                "xml",
+                "php",
+                "vue",
+                "angular",
+                "graphql",
+                "sql"
+            ]
+        },
+        {
+            "code": "ctool-code-run",
+            "explain": "代码 - 运行",
+            "cmds": ["code", "run", "代码", "运行", "ctool-code-run", "代码运行"]
+        },
+        {
+            "code": "ctool-unicode-encoder",
+            "explain": "Unicode - 编码",
+            "cmds": ["unicode", "encoder", "编码", "ctool-unicode-encoder", "unicode编码"]
+        },
+        {
+            "code": "ctool-unicode-decoder",
+            "explain": "Unicode - 解码",
+            "cmds": ["unicode", "decoder", "解码", "ctool-unicode-decoder", "unicode解码"]
+        },
+        {
+            "code": "ctool-radix-radix",
+            "explain": "进制转换",
+            "cmds": ["radix", "进制转换", "ctool-radix", "进制转换进制转换"]
+        },
+        {
+            "code": "ctool-regex-regex",
+            "explain": "正则表达式",
+            "cmds": ["regex", "正则表达式", "ctool-regex", "正则表达式正则表达式"]
+        },
+        {
+            "code": "ctool-randomString-randomString",
+            "explain": "随机字符生成",
+            "cmds": ["randomstring", "随机字符生成", "ctool-randomstring", "随机字符生成随机字符生成"]
+        },
+        {
+            "code": "ctool-serialize-serialize",
+            "explain": "序列化",
+            "cmds": [
+                "serialize",
+                "序列化",
+                "ctool-serialize",
+                "序列化序列化",
+                "json",
+                "http query string",
+                "csv",
+                "html table",
+                "xml",
+                "yaml",
+                "toml",
+                "properties",
+                "php array",
+                "php serialize"
+            ]
+        },
+        {
+            "code": "ctool-diffs-diffs",
+            "explain": "文本比对",
+            "cmds": ["diffs", "文本比对", "ctool-diffs", "文本比对文本比对"]
+        },
+        {
+            "code": "ctool-crontab-crontab",
+            "explain": "Crontab",
+            "cmds": ["crontab", "ctool-crontab", "crontabcrontab"]
+        },
+        {
+            "code": "ctool-websocket-websocket",
+            "explain": "Websocket",
+            "cmds": ["websocket", "ctool-websocket", "websocketwebsocket"]
+        },
+        {
+            "code": "ctool-unit-unit",
+            "explain": "单位换算",
+            "cmds": ["unit", "单位换算", "ctool-unit", "单位换算单位换算"]
+        },
+        {
+            "code": "ctool-time-timestamp",
+            "explain": "时间日期 - 时间戳",
+            "cmds": ["time", "timestamp", "时间日期", "时间戳", "ctool-time-timestamp", "时间日期时间戳"]
+        },
+        {
+            "code": "ctool-time-timezone",
+            "explain": "时间日期 - 时区",
+            "cmds": ["time", "timezone", "时间日期", "时区", "ctool-time-timezone", "时间日期时区"]
+        },
+        {
+            "code": "ctool-time-calculator",
+            "explain": "时间日期 - 计算器",
+            "cmds": ["time", "calculator", "时间日期", "计算器", "ctool-time-calculator", "时间日期计算器"]
+        },
+        {
+            "code": "ctool-uuid-uuid",
+            "explain": "UUID生成",
+            "cmds": ["uuid", "uuid生成", "ctool-uuid", "uuid生成uuid生成"]
+        },
+        {
+            "code": "ctool-ascii-ascii",
+            "explain": "ASCII",
+            "cmds": ["ascii", "ctool-ascii", "asciiascii"]
+        },
+        {
+            "code": "ctool-variableConversion-variableConversion",
+            "explain": "变量名",
+            "cmds": ["variableconversion", "变量名", "ctool-variableconversion", "变量名变量名"]
+        },
+        {
+            "code": "ctool-jwt-jwt",
+            "explain": "JWT解码",
+            "cmds": ["jwt", "jwt解码", "ctool-jwt", "jwt解码jwt解码"]
+        },
+        {
+            "code": "ctool-hexString-stringToHex",
+            "explain": "Hex/String - String => Hex",
+            "cmds": [
+                "hexstring",
+                "stringtohex",
+                "hex/string",
+                "string => hex",
+                "ctool-hexstring-stringtohex",
+                "hex/stringstring => hex",
+                "十六进制转字符串"
+            ]
+        },
+        {
+            "code": "ctool-hexString-hexToString",
+            "explain": "Hex/String - Hex => String",
+            "cmds": [
+                "hexstring",
+                "hextostring",
+                "hex/string",
+                "hex => string",
+                "ctool-hexstring-hextostring",
+                "hex/stringhex => string",
+                "字符串转十六进制"
+            ]
+        },
+        {
+            "code": "ctool-text-text",
+            "explain": "文本处理",
+            "cmds": [
+                "text",
+                "文本处理",
+                "ctool-text",
+                "文本处理文本处理",
+                "大小写转换",
+                "中英文标点转换",
+                "简繁转换",
+                "字符替换",
+                "字符统计",
+                "行去重",
+                "添加行号",
+                "行排序",
+                "过滤行首尾不可见字符",
+                "过滤空行"
+            ]
+        },
+        {
+            "code": "ctool-html-html",
+            "explain": "Html编码",
+            "cmds": ["html", "html编码", "ctool-html", "html编码html编码"]
+        },
+        {
+            "code": "ctool-binary-binary",
+            "explain": "原码/反码/补码",
+            "cmds": ["binary", "原码/反码/补码", "ctool-binary", "原码/反码/补码原码/反码/补码"]
+        },
+        {
+            "code": "ctool-arm-armToHex",
+            "explain": "ARM/HEX - ARM to HEX",
+            "cmds": ["arm", "armtohex", "arm/hex", "arm to hex", "ctool-arm-armtohex", "arm/hexarm to hex"]
+        },
+        {
+            "code": "ctool-arm-hexToArm",
+            "explain": "ARM/HEX - HEX to ARM",
+            "cmds": ["arm", "hextoarm", "arm/hex", "hex to arm", "ctool-arm-hextoarm", "arm/hexhex to arm"]
+        },
+        {
+            "code": "ctool-bcrypt-bcrypt",
+            "explain": "Bcrypt",
+            "cmds": ["bcrypt", "ctool-bcrypt", "bcryptbcrypt"]
+        },
+        {
+            "code": "ctool-ipcalc-ipv4",
+            "explain": "IP网络计算器 - IPv4",
+            "cmds": ["ipcalc", "ipv4", "ip网络计算器", "ctool-ipcalc-ipv4", "ip网络计算器ipv4"]
+        },
+        {
+            "code": "ctool-ipcalc-ipv6",
+            "explain": "IP网络计算器 - IPv6",
+            "cmds": ["ipcalc", "ipv6", "ip网络计算器", "ctool-ipcalc-ipv6", "ip网络计算器ipv6"]
+        },
+        {
+            "code": "ctool-sqlFillParameter-sqlFillParameter",
+            "explain": "SQL参数填充",
+            "cmds": ["sqlfillparameter", "sql参数填充", "ctool-sqlfillparameter", "sql参数填充sql参数填充"]
+        },
+        {
+            "code": "ctool-httpSnippet-httpSnippet",
+            "explain": "Http请求代码",
+            "cmds": ["httpsnippet", "http请求代码", "ctool-httpsnippet", "http请求代码http请求代码"]
+        },
+        {
+            "code": "ctool-dataValidation-bcc",
+            "explain": "BCC/CRC/LRC - BCC",
+            "cmds": ["datavalidation", "bcc", "bcc/crc/lrc", "ctool-datavalidation-bcc", "bcc/crc/lrcbcc"]
+        },
+        {
+            "code": "ctool-dataValidation-crc",
+            "explain": "BCC/CRC/LRC - CRC",
+            "cmds": ["datavalidation", "crc", "bcc/crc/lrc", "ctool-datavalidation-crc", "bcc/crc/lrccrc"]
+        },
+        {
+            "code": "ctool-dataValidation-lrc",
+            "explain": "BCC/CRC/LRC - LRC",
+            "cmds": ["datavalidation", "lrc", "bcc/crc/lrc", "ctool-datavalidation-lrc", "bcc/crc/lrclrc"]
+        },
+        {
+            "code": "ctool-color-color",
+            "explain": "颜色",
+            "cmds": ["color", "颜色", "ctool-color", "颜色颜色"]
+        },
+        {
+            "code": "ctool-hmac-hmac",
+            "explain": "HMAC",
+            "cmds": ["hmac", "ctool-hmac", "hmachmac", "md5", "sha1", "sha256", "sha512", "sm3"]
+        },
+        {
+            "code": "ctool-gzip-encoder",
+            "explain": "GZIP - 编码/压缩",
+            "cmds": ["gzip", "encoder", "编码/压缩", "ctool-gzip-encoder", "gzip编码/压缩"]
+        },
+        {
+            "code": "ctool-gzip-decoder",
+            "explain": "GZIP - 解码/解压",
+            "cmds": ["gzip", "decoder", "解码/解压", "ctool-gzip-decoder", "gzip解码/解压"]
+        },
+        {
+            "code": "ctool-punycode-encoder",
+            "explain": "域名编码 - 编码",
+            "cmds": ["punycode", "encoder", "域名编码", "编码", "ctool-punycode-encoder", "域名编码编码"]
+        },
+        {
+            "code": "ctool-punycode-decoder",
+            "explain": "域名编码 - 解码",
+            "cmds": ["punycode", "decoder", "域名编码", "解码", "ctool-punycode-decoder", "域名编码解码"]
+        },
+        {
+            "code": "ctool-urlParse-urlParse",
+            "explain": "Url解析",
+            "cmds": ["urlparse", "url解析", "ctool-urlparse", "url解析url解析"]
+        },
+        {
+            "code": "ctool-asn1-asn1",
+            "explain": "ASN.1解码",
+            "cmds": ["asn1", "asn.1解码", "ctool-asn1", "asn.1解码asn.1解码"]
+        },
+        {
+            "code": "ctool-dockerCompose-dockerCompose",
+            "explain": "Docker run到Compose",
+            "cmds": [
+                "dockercompose",
+                "docker run到compose",
+                "ctool-dockercompose",
+                "docker run到composedocker run到compose"
+            ]
+        },
+        {
+            "code": "ctool-zhNumber-zhNumber",
+            "explain": "中文数字转换",
+            "cmds": ["zhnumber", "中文数字转换", "ctool-zhnumber", "中文数字转换中文数字转换"]
+        }
+    ]
+}

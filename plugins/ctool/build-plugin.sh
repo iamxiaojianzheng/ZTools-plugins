@@ -15,21 +15,18 @@ pnpm run build
 
 # 编译插件
 echo "3. 编译插件..."
-pnpm --filter ctool-adapter-utools run platform-release
+pnpm --filter ctool-adapter-ruck run platform-release
 
-# 清空并创建 dist 目录
-echo "4. 准备输出目录..."
-rm -rf dist
-mkdir -p dist
-
-# 解压构建产物到 dist 目录
-echo "5. 解压构建产物..."
-if [ -f "_release/ctool_utools.zip" ]; then
-    # 解压到 dist 目录
-    unzip -q _release/ctool_utools.zip -d dist/
-    echo "✓ 构建产物已解压到 dist/ctool_utools"
+# 检查产物
+if [ -d "dist" ] && [ -f "dist/plugin.json" ]; then
+    echo "✓ Ruck 插件构建产物已就绪在 dist 目录"
+elif [ -f "_release/ctool_ruck.zip" ]; then
+    rm -rf dist
+    mkdir -p dist
+    unzip -q _release/ctool_ruck.zip -d dist/
+    echo "✓ 构建产物已解压到 dist 目录"
 else
-    echo "✗ 错误: _release/ctool_utools.zip 文件不存在"
+    echo "✗ 错误: 构建失败"
     exit 1
 fi
 

@@ -33,6 +33,7 @@
         "ctool-adapter-chrome": "workspace:*",
         "ctool-adapter-edge": "workspace:*",
         "ctool-adapter-firefox": "workspace:*",
+        "ctool-adapter-ruck": "workspace:*",
         "ctool-adapter-tauri": "workspace:*",
         "ctool-adapter-utools": "workspace:*",
         "ctool-config": "workspace:*",

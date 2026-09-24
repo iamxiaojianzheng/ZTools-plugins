@@ -32,8 +32,12 @@ class Platform {
         return this.name === "web";
     }
 
+    isRuck(): boolean {
+        return this.name === "ruck";
+    }
+
     isDesktop(): boolean {
-        return ["tauri"].includes(this.name);
+        return ["tauri", "ruck"].includes(this.name);
     }
 
     getLocale(): LocaleLists {
