@@ -55,32 +55,56 @@ function ask(question) {
   });
 }
 
-// 判定是否是适配好的 Ruck 插件
-function isRuckPlugin(pluginDir) {
+// 获取插件信息并判定是否是适配好的 Ruck 插件
+function getPluginInfo(folderName, pluginDir) {
+  let name = folderName;
+  let version = '1.0.0';
+  let title = folderName;
+  let isRuck = false;
+
   const pPath = fs.existsSync(path.join(pluginDir, 'public', 'plugin.json'))
     ? path.join(pluginDir, 'public', 'plugin.json')
     : path.join(pluginDir, 'plugin.json');
 
   if (fs.existsSync(pPath)) {
     try {
-      const data = JSON.parse(fs.readFileSync(pPath, 'utf8'));
-      if (data.pluginType === 'ui' || (data.name && data.name.startsWith('@ruck-plugins/'))) {
-        return true;
+      const pData = JSON.parse(fs.readFileSync(pPath, 'utf8'));
+      if (pData.pluginType === 'ui' || (pData.name && pData.name.startsWith('@ruck-plugins/'))) {
+        isRuck = true;
       }
+      name = pData.name || name;
+      version = pData.version || version;
+      title = pData.displayName || pData.title || title;
     } catch (e) {}
   }
 
-  const pkgPath = path.join(pluginDir, 'package.json');
-  if (fs.existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      if (pkg.name && pkg.name.startsWith('@ruck-plugins/')) {
-        return true;
-      }
-    } catch (e) {}
+  if (!isRuck) {
+    const pkgPath = path.join(pluginDir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        if (pkg.name && pkg.name.startsWith('@ruck-plugins/')) {
+          isRuck = true;
+          name = pkg.name || name;
+          version = pkg.version || version;
+        }
+      } catch (e) {}
+    }
   }
 
-  return false;
+  if (!isRuck) return null;
+
+  return {
+    folder: folderName,
+    fullPath: pluginDir,
+    name,
+    title,
+    version
+  };
+}
+
+function isRuckPlugin(pluginDir) {
+  return Boolean(getPluginInfo(path.basename(pluginDir), pluginDir));
 }
 
 // 扫描 plugins/ 目录下的 Ruck 插件
@@ -94,32 +118,9 @@ function scanRuckPlugins(workspaceRoot) {
   for (const item of items) {
     if (!item.isDirectory()) continue;
     const pluginDir = path.join(baseDir, item.name);
-
-    if (isRuckPlugin(pluginDir)) {
-      let name = item.name;
-      let version = '1.0.0';
-      let title = item.name;
-
-      const pPath = fs.existsSync(path.join(pluginDir, 'public', 'plugin.json'))
-        ? path.join(pluginDir, 'public', 'plugin.json')
-        : path.join(pluginDir, 'plugin.json');
-
-      if (fs.existsSync(pPath)) {
-        try {
-          const pData = JSON.parse(fs.readFileSync(pPath, 'utf8'));
-          name = pData.name || name;
-          version = pData.version || version;
-          title = pData.displayName || pData.title || title;
-        } catch (e) {}
-      }
-
-      plugins.push({
-        folder: item.name,
-        fullPath: pluginDir,
-        name,
-        title,
-        version
-      });
+    const info = getPluginInfo(item.name, pluginDir);
+    if (info) {
+      plugins.push(info);
     }
   }
 
@@ -389,43 +390,61 @@ async function main() {
   log(`🚀  ZTools -> Ruck 插件一键发包工具       `, colors.bright);
   log(`========================================\n`, colors.bright);
 
-  try {
-    const whoami = execSync('npm whoami', { encoding: 'utf8' }).trim();
-    success(`已登录 NPM 账号: ${whoami}`);
-  } catch (e) {
-    warn(`未检测到 NPM 登录状态，若尚未登录请先执行 "npm login"`);
-  }
+  // 异步在后台预检 NPM 账号，避免在启动时产生 3-10 秒的网络阻塞卡顿
+  const whoamiPromise = (async () => {
+    try {
+      const childProcess = await import('child_process');
+      return await new Promise((res) => {
+        childProcess.exec('npm whoami', { encoding: 'utf8', timeout: 5000 }, (err, stdout) => {
+          if (!err && stdout) res(stdout.trim());
+          else res(null);
+        });
+      });
+    } catch (e) {
+      return null;
+    }
+  })();
 
   const workspaceRoot = process.cwd();
-  const plugins = scanRuckPlugins(workspaceRoot);
+  const argPluginName = process.argv[2];
+  let targetPlugin = null;
 
-  if (plugins.length === 0) {
-    error('未在 plugins/ 目录下找到适配了 Ruck 的插件（需在 plugin.json 声明 pluginType: "ui" 或 @ruck-plugins/）');
-    process.exit(1);
+  // 极速直达通道：若命令行显式指定了插件名，直接定位目标目录，完全免除全量扫描
+  if (argPluginName && !argPluginName.startsWith('-')) {
+    const directPath = path.join(workspaceRoot, 'plugins', argPluginName);
+    if (fs.existsSync(directPath)) {
+      targetPlugin = getPluginInfo(argPluginName, directPath);
+    }
   }
 
-  let targetPlugin = null;
-  const argPluginName = process.argv[2];
+  if (!targetPlugin) {
+    const plugins = scanRuckPlugins(workspaceRoot);
 
-  if (argPluginName && !argPluginName.startsWith('-')) {
-    targetPlugin = plugins.find(p => p.folder === argPluginName || p.name === argPluginName);
-    if (!targetPlugin) {
-      error(`未找到插件 "${argPluginName}"，可用 Ruck 插件: ${plugins.map(p => p.folder).join(', ')}`);
+    if (plugins.length === 0) {
+      error('未在 plugins/ 目录下找到适配了 Ruck 的插件（需在 plugin.json 声明 pluginType: "ui" 或 @ruck-plugins/）');
       process.exit(1);
     }
-  } else {
-    log(`已检测到以下已适配的 Ruck 插件:`, colors.cyan);
-    plugins.forEach((p, idx) => {
-      console.log(`  [${colors.bright}${idx + 1}${colors.reset}] ${p.title} (${colors.yellow}${p.name}${colors.reset} v${p.version})`);
-    });
 
-    const choice = await ask(`\n请选择要发布的插件 (1-${plugins.length}):`);
-    const idx = parseInt(choice, 10) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= plugins.length) {
-      error('无效的选择，发布已取消。');
-      process.exit(1);
+    if (argPluginName && !argPluginName.startsWith('-')) {
+      targetPlugin = plugins.find(p => p.folder === argPluginName || p.name === argPluginName);
+      if (!targetPlugin) {
+        error(`未找到插件 "${argPluginName}"，可用 Ruck 插件: ${plugins.map(p => p.folder).join(', ')}`);
+        process.exit(1);
+      }
+    } else {
+      log(`已检测到以下已适配的 Ruck 插件:`, colors.cyan);
+      plugins.forEach((p, idx) => {
+        console.log(`  [${colors.bright}${idx + 1}${colors.reset}] ${p.title} (${colors.yellow}${p.name}${colors.reset} v${p.version})`);
+      });
+
+      const choice = await ask(`\n请选择要发布的插件 (1-${plugins.length}):`);
+      const idx = parseInt(choice, 10) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= plugins.length) {
+        error('无效的选择，发布已取消。');
+        process.exit(1);
+      }
+      targetPlugin = plugins[idx];
     }
-    targetPlugin = plugins[idx];
   }
 
   log(`\n🎯 目标插件: ${colors.bright}${targetPlugin.title}${colors.reset} [${targetPlugin.name}]`);
@@ -468,6 +487,13 @@ async function main() {
   const publishDir = preparePublishDir(targetPlugin.fullPath, newVersion);
 
   printPublishArtifactsSummary(publishDir);
+
+  const whoami = await whoamiPromise;
+  if (whoami) {
+    info(`👤 当前 NPM 登录账号: ${colors.bright}${whoami}${colors.reset}`);
+  } else {
+    warn(`⚠️  未检测到 NPM 登录状态，若尚未登录请先在终端执行 "npm login"`);
+  }
 
   const confirm = await ask(`\n确认立即发布 ${targetPlugin.name}@${newVersion} 到 NPM? (y/N):`);
   if (confirm.toLowerCase() !== 'y') {
