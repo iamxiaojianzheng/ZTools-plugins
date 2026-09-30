@@ -1,0 +1,30 @@
+{
+  "name": "@ruck-plugins/ztools-file-unlocker",
+  "version": "1.0.1",
+  "type": "module",
+  "description": "ZTools / Ruck 插件 - 查找并解除被占用文件，支持解锁、解锁并删除/重命名/移动、批量处理",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "files": [
+    "bin",
+    "index.html",
+    "index.css",
+    "app.js",
+    "logo.png",
+    "preload.js",
+    "plugin.json",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "ztools",
+    "ztools-plugin",
+    "ruck",
+    "ruck-plugin",
+    "unlocker",
+    "file-unlocker"
+  ],
+  "author": "zhanglei",
+  "license": "MIT"
+}

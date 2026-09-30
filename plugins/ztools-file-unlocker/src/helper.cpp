@@ -608,12 +608,115 @@ bool KillProcessById(DWORD pid, bool& wasExplorer) {
     return res != FALSE;
 }
 
+bool SendToRecycleBin(const std::wstring& path) {
+    std::wstring norm = NormalizePath(path);
+    std::vector<wchar_t> doubleNullPath(norm.begin(), norm.end());
+    doubleNullPath.push_back(L'\0');
+    doubleNullPath.push_back(L'\0');
+
+    SHFILEOPSTRUCTW fileOp = {0};
+    fileOp.wFunc = FO_DELETE;
+    fileOp.pFrom = doubleNullPath.data();
+    fileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    int res = SHFileOperationW(&fileOp);
+    if (res == 0 && !fileOp.fAnyOperationsAborted) return true;
+
+    DWORD attrs = GetFileAttributesW(norm.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES) return true;
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
+        return RemoveDirectoryW(norm.c_str()) != FALSE;
+    } else {
+        return DeleteFileW(norm.c_str()) != FALSE;
+    }
+}
+
+bool RenameFileOrDir(const std::wstring& targetPath, const std::wstring& newName, std::wstring& outDest) {
+    std::wstring norm = NormalizePath(targetPath);
+    size_t lastSlash = norm.find_last_of(L"\\/");
+    std::wstring dir = (lastSlash != std::wstring::npos) ? norm.substr(0, lastSlash) : L"";
+    std::wstring dest = dir.empty() ? newName : (dir + L"\\" + newName);
+    outDest = dest;
+    return MoveFileW(norm.c_str(), dest.c_str()) != FALSE;
+}
+
+bool MoveFileOrDir(const std::wstring& targetPath, const std::wstring& destDir, std::wstring& outDest) {
+    std::wstring norm = NormalizePath(targetPath);
+    std::wstring normDir = NormalizePath(destDir);
+    SHCreateDirectoryExW(NULL, normDir.c_str(), NULL);
+    size_t lastSlash = norm.find_last_of(L"\\/");
+    std::wstring fname = (lastSlash != std::wstring::npos) ? norm.substr(lastSlash + 1) : norm;
+    std::wstring dest = normDir + L"\\" + fname;
+    outDest = dest;
+    return MoveFileW(norm.c_str(), dest.c_str()) != FALSE;
+}
+
+void ProbeLockStatus(const std::wstring& path) {
+    std::wstring norm = NormalizePath(path);
+    DWORD attrs = GetFileAttributesW(norm.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES) {
+        std::cout << "{\"locked\": null, \"code\": \"ENOENT\"}\n";
+        return;
+    }
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
+        std::cout << "{\"locked\": null, \"isDirectory\": true}\n";
+        return;
+    }
+    HANDLE hFile = CreateFileW(norm.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        CloseHandle(hFile);
+        std::cout << "{\"locked\": false}\n";
+    } else {
+        DWORD err = GetLastError();
+        if (err == ERROR_SHARING_VIOLATION || err == ERROR_LOCK_VIOLATION || err == ERROR_ACCESS_DENIED) {
+            std::cout << "{\"locked\": true, \"code\": " << err << "}\n";
+        } else {
+            std::cout << "{\"locked\": null, \"code\": " << err << "}\n";
+        }
+    }
+}
+
+void GetPathInfoStat(const std::wstring& path) {
+    std::wstring norm = NormalizePath(path);
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (!GetFileAttributesExW(norm.c_str(), GetFileExInfoStandard, &data)) {
+        std::cout << "{\"ok\": false, \"code\": " << GetLastError() << "}\n";
+        return;
+    }
+    bool isDir = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    ULARGE_INTEGER size;
+    size.LowPart = data.nFileSizeLow;
+    size.HighPart = data.nFileSizeHigh;
+    unsigned long long bytes = isDir ? 0 : size.QuadPart;
+
+    std::string sizeStr;
+    if (isDir) {
+        sizeStr = "文件夹";
+    } else {
+        char buf[64];
+        double b = (double)bytes;
+        if (b >= 1024.0 * 1024.0 * 1024.0) {
+            snprintf(buf, sizeof(buf), "%.2f GB", b / (1024.0 * 1024.0 * 1024.0));
+        } else if (b >= 1024.0 * 1024.0) {
+            snprintf(buf, sizeof(buf), "%.1f MB", b / (1024.0 * 1024.0));
+        } else if (b >= 1024.0) {
+            snprintf(buf, sizeof(buf), "%.1f KB", b / 1024.0);
+        } else {
+            snprintf(buf, sizeof(buf), "%llu B", bytes);
+        }
+        sizeStr = buf;
+    }
+
+    std::cout << "{\"ok\": true, \"isDirectory\": " << (isDir ? "true" : "false")
+              << ", \"size\": " << bytes
+              << ", \"sizeStr\": \"" << sizeStr << "\"}\n";
+}
+
 int wmain(int argc, wchar_t* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     EnableDebugPrivilege();
 
     if (argc < 2) {
-        std::cout << "Usage:\n  unlocker-helper list <path1> [path2...]\n  unlocker-helper list-batch <path1> [path2...]\n  unlocker-helper get-selected\n  unlocker-helper kill <pid>\n  unlocker-helper restart-explorer\n  unlocker-helper close-handle <pid> <handleHex>\n";
+        std::cout << "Usage:\n  unlocker-helper list <path1> [path2...]\n  unlocker-helper list-batch <path1> [path2...]\n  unlocker-helper get-selected\n  unlocker-helper kill <pid>\n  unlocker-helper restart-explorer\n  unlocker-helper close-handle <pid> <handleHex>\n  unlocker-helper delete <path>\n  unlocker-helper rename <path> <newName>\n  unlocker-helper move <path> <destDir>\n  unlocker-helper probe-lock <path>\n  unlocker-helper stat <path>\n";
         return 0;
     }
 
@@ -623,6 +726,36 @@ int wmain(int argc, wchar_t* argv[]) {
         bool ok = RestartExplorerShell();
         std::cout << "{\"ok\": " << (ok ? "true" : "false") << "}\n";
         return ok ? 0 : 1;
+    }
+
+    if (cmd == L"delete" && argc >= 3) {
+        bool ok = SendToRecycleBin(argv[2]);
+        std::cout << "{\"ok\": " << (ok ? "true" : "false") << "}\n";
+        return ok ? 0 : 1;
+    }
+
+    if (cmd == L"rename" && argc >= 4) {
+        std::wstring outDest;
+        bool ok = RenameFileOrDir(argv[2], argv[3], outDest);
+        std::cout << "{\"ok\": " << (ok ? "true" : "false") << ", \"dest\": \"" << EscapeJsonString(outDest) << "\"}\n";
+        return ok ? 0 : 1;
+    }
+
+    if (cmd == L"move" && argc >= 4) {
+        std::wstring outDest;
+        bool ok = MoveFileOrDir(argv[2], argv[3], outDest);
+        std::cout << "{\"ok\": " << (ok ? "true" : "false") << ", \"dest\": \"" << EscapeJsonString(outDest) << "\"}\n";
+        return ok ? 0 : 1;
+    }
+
+    if (cmd == L"probe-lock" && argc >= 3) {
+        ProbeLockStatus(argv[2]);
+        return 0;
+    }
+
+    if ((cmd == L"stat" || cmd == L"path-info") && argc >= 3) {
+        GetPathInfoStat(argv[2]);
+        return 0;
     }
 
     if (cmd == L"get-selected") {

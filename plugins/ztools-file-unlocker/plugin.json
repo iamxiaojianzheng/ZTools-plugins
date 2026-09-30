@@ -1,14 +1,32 @@
 {
-  "name": "ztools-file-unlocker",
+  "name": "@ruck-plugins/ztools-file-unlocker",
   "title": "文件解锁器",
   "pluginName": "文件解锁器",
   "description": "查找并解除被占用文件，支持解锁、解锁并删除/重命名/移动、批量处理",
   "version": "1.0.1",
   "author": "zhanglei",
+  "pluginType": "ui",
   "main": "index.html",
   "preload": "preload.js",
   "logo": "logo.png",
-  "unpack": "bin/**",
+  "height": 560,
+  "permissions": [
+    {
+      "shell_execute": [
+        "unlocker-helper.exe",
+        "taskkill.exe",
+        "taskkill",
+        "cmd.exe",
+        "cmd",
+        "explorer.exe",
+        "explorer"
+      ]
+    },
+    "clipboard_read",
+    "clipboard_write",
+    "window_control",
+    "system_info"
+  ],
   "features": [
     {
       "code": "file-unlocker",
@@ -25,6 +43,23 @@
         "强制删除",
         "unlock",
         "unlocker"
+      ]
+    },
+    {
+      "code": "unlockfile",
+      "explain": "解除文件占用",
+      "icon": "logo.png",
+      "cmds": [
+        {
+          "type": "files",
+          "fileType": "file",
+          "label": "解除占用"
+        },
+        {
+          "type": "files",
+          "fileType": "directory",
+          "label": "解除占用"
+        }
       ]
     }
   ],

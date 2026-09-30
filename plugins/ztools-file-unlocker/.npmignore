@@ -1,0 +1,7 @@
+src-compat/
+build.js
+src/
+scripts/
+node_modules/
+*.log
+.git
