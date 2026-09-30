@@ -238,8 +238,36 @@ function syncReadmeToDist(pluginDir, distDir) {
 function printPublishArtifactsSummary(publishDir) {
   log(`\n📦 待发布产物清单 [${path.basename(publishDir)}/]:`, colors.cyan);
   try {
+    const pkgPath = path.join(publishDir, 'package.json');
+    let allowedFiles = null;
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        if (Array.isArray(pkg.files)) {
+          allowedFiles = new Set(pkg.files.map(f => f.replace(/[\\/]+$/, '')));
+        }
+      } catch (e) {}
+    }
+
+    const npmignorePath = path.join(publishDir, '.npmignore');
+    let ignoredPatterns = [];
+    if (fs.existsSync(npmignorePath)) {
+      ignoredPatterns = fs.readFileSync(npmignorePath, 'utf8')
+        .split(/[\r\n]+/)
+        .map(s => s.trim().replace(/[\\/]+$/, ''))
+        .filter(s => s && !s.startsWith('#'));
+    }
+
     const items = fs.readdirSync(publishDir);
     for (const item of items) {
+      if (item === '.git' || item === 'node_modules' || item === '.npmignore') continue;
+      if (allowedFiles) {
+        const isAlwaysIncluded = item.toLowerCase() === 'readme.md' || item === 'plugin.json' || item === 'package.json' || item.toLowerCase() === 'changelog.md';
+        if (!allowedFiles.has(item) && !isAlwaysIncluded) continue;
+      } else if (ignoredPatterns.length > 0) {
+        if (ignoredPatterns.includes(item)) continue;
+      }
+
       const fullPath = path.join(publishDir, item);
       const stat = fs.statSync(fullPath);
       const isDir = stat.isDirectory();
