@@ -1,0 +1,8 @@
+src-compat/
+service/
+utils/
+build.js
+.git
+.agent/
+node_modules/
+*.log
