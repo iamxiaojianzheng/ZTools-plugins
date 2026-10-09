@@ -53,7 +53,12 @@
    - 刷新本地缓存并通过 `callbackSetList` 再次推流更新。
 3. **即时检索 (Search)**：
    - 内存过滤，支持拼音、大小写无关的工程名、项目绝对路径、IDE 名字及窗口文件名的多维模糊匹配。
-4. **唤醒启动与自动收窗 (Select)**：
-   - 用户选中条目并回车，执行器优先调用受控绝对路径 `ruck.shell.execute(ideExecutable, [projectPath])`；
-   - 启动命令成功调用后（`launched === true`），执行器主动调用 `await hideAndOutPlugin()` 隐藏主搜索窗口，给用户极致流畅的启动体验；
-   - 若拉起未成功，则保持窗口不关闭并气泡提示用户，便于排查。
+4. **唤醒启动与生命周期契约 (Select)**：
+   - **GUI 长生命周期进程契约**：JetBrains 系列 IDE（`idea64.exe` 等）属于常驻主 GUI 进程。Ruck 宿主的 `ruck.shell.execute` 内部调用阻塞等待 `command.output().await` 且设定了 30s 超时与 `kill_on_drop(true)`，严禁用于启动未常驻的 GUI 应用（否则将在 30 秒到达时触发超时错误并强杀刚启动的 IDE）。
+   - **非阻塞与脱离唤醒规范 (`launchGuiApplication`)**：
+     - **Windows 进程脱离首选**：优先采用 `cmd.exe /c start "" <exe> <project>`，耗时 < 0.1s 极速返回 0，同时将 GUI 进程交由系统内核全托管，彻底脱离父进程监控；
+     - **跨平台异步非阻塞通道**：次选调用 `ruck.shell.spawn`，直接拉起子进程并返回 PID，不阻塞等待；
+     - **宿主沙箱补齐**：Ruck 宿主 `TemplateSandbox` 同步补齐 `shell.spawn` 能力，保持原生模板模式与独立 Webview 模式 SDK 能力同构。
+   - **绝对路径与自动兜底**：Windows 下启动候选列表不仅优先采用缓存记录，还自动与 `IdeLocator` 最新嗅探到的绝对路径动态合并，杜绝因裸命令或环境更新导致无法唤醒。
+   - **失败反馈边界**：彻底废除启动失败误触 `openPath` 呼出文件资源管理器的错误降级；当全部候选均失败时，保持搜索窗口并以 `showNotice` 弹出明确错误原因供排查。
+   - **自动隐藏收窗**：启动命令成功派发（`launched === true`）后，执行器主动调用 `await hideAndOutPlugin()` 毫秒级收起主搜索窗口。

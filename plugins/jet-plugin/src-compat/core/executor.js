@@ -35,46 +35,31 @@ export async function launchProject(project) {
         await ruck.shell.execute("open", ["-a", appName, projectPath]);
         launched = true;
       } else if (platform === "win32") {
-        // Windows: 执行具体 IDE 可执行程序
+        // Windows: 执行具体 IDE 可执行程序（优先脱离拉起，兼备 spawn 异步启动，杜绝 30s 超时与重试）
         const candidateExecutables = getWindowsExecutableCandidates(project);
 
-        // 优先使用探测到的绝对路径进行启动
         for (const exe of candidateExecutables) {
           try {
             console.log(`[Executor] 尝试执行可执行文件:`, exe);
-            await ruck.shell.execute(exe, [projectPath]);
+            await launchGuiApplication(ruck.shell, exe, [projectPath], "win32");
             launched = true;
             break;
           } catch (execErr) {
             console.warn(`[Executor] 执行 ${exe} 失败:`, execErr.message);
           }
         }
-
-        // 若直接执行全部失败，降级通过系统关联直接打开工程目录，杜绝无效裸名导致的 Windows 弹窗
-        if (!launched) {
-          console.log(`[Executor] 启动器直接执行未成功，降级通过系统关联打开:`, projectPath);
-          try {
-            await ruck.shell.openPath(projectPath);
-            launched = true;
-          } catch (openErr) {
-            console.warn(`[Executor] 系统关联打开亦失败:`, openErr.message);
-          }
-        }
       } else {
         // Linux: 执行常规可执行程序
         const candidateExecutables = project.executables || ["idea", "webstorm", "pycharm"];
-        let launched = false;
         for (const exe of candidateExecutables) {
           try {
-            await ruck.shell.execute(exe, [projectPath]);
+            console.log(`[Executor] 尝试执行可执行文件:`, exe);
+            await launchGuiApplication(ruck.shell, exe, [projectPath], "linux");
             launched = true;
             break;
           } catch (e) {
-            // continue
+            console.warn(`[Executor] 执行 ${exe} 失败:`, e.message);
           }
-        }
-        if (!launched) {
-          await ruck.shell.openPath(projectPath);
         }
       }
     } else {
@@ -88,7 +73,7 @@ export async function launchProject(project) {
       return true;
     } else {
       console.warn(`[Executor] 未能成功拉起启动器，保持窗口以便排查`);
-      showNotice(`未找到可用的 ${project.ideName || "IDE"} 启动器`);
+      showNotice(`未找到可用的 ${project.ideName || "IDE"} 启动器，请检查安装路径`);
       return false;
     }
   } catch (error) {
@@ -148,6 +133,48 @@ export async function copyProjectPath(text) {
 }
 
 /**
+ * 跨平台桌面 GUI 应用拉起器
+ * 核心原则：彻底脱离宿主生命周期与 I/O 管道，杜绝 30s 超时与父子进程绑定
+ * @param {Object} shell ruck.shell
+ * @param {string} program 程序路径或可执行文件名
+ * @param {string[]} args 启动参数（如项目路径）
+ * @param {string} platform 当前操作系统平台
+ */
+async function launchGuiApplication(shell, program, args = [], platform = "win32") {
+  if (!shell) {
+    throw new Error("当前环境未提供有效的 shell 执行器");
+  }
+
+  // 1. Windows 专有优化：优先利用系统脱离命令 (cmd.exe /c start) 唤醒
+  // start 命令可在 0.1 秒内返回 exitCode 0，同时将 GUI 进程完全交由 Windows 系统内核托管，绝无超时强杀
+  if (platform === "win32") {
+    try {
+      console.log(`[Executor] 优先尝试通过 cmd.exe start 脱离拉起:`, program);
+      await shell.execute("cmd.exe", ["/c", "start", "", program, ...args]);
+      return true;
+    } catch (cmdErr) {
+      console.warn(`[Executor] cmd.exe 脱离拉起异常，尝试备用链路:`, cmdErr.message);
+    }
+  }
+
+  // 2. 跨平台非阻塞通道：优先使用 ruck.shell.spawn
+  if (typeof shell.spawn === "function") {
+    console.log(`[Executor] 使用 ruck.shell.spawn 异步非阻塞拉起:`, program);
+    await shell.spawn(program, args);
+    return true;
+  }
+
+  // 3. 通用 execute 兜底
+  if (typeof shell.execute === "function") {
+    console.log(`[Executor] 使用 ruck.shell.execute 兜底拉起:`, program);
+    await shell.execute(program, args);
+    return true;
+  }
+
+  throw new Error("未能找到可用的进程启动接口");
+}
+
+/**
  * 获取 Windows 下的启动器候选列表
  * @param {Object} project
  * @returns {string[]}
@@ -155,28 +182,29 @@ export async function copyProjectPath(text) {
 function getWindowsExecutableCandidates(project) {
   const candidates = [];
 
-  // 1. 如果 project.launchExecutable 存在且有效
+  // 1. 如果 project.launchExecutable 存在且有效，优先尝试
   if (project.launchExecutable) {
     candidates.push(project.launchExecutable);
-  } else {
-    const appInfo = ideLocator.findAppForProject(project);
-    if (appInfo && appInfo.exePath) {
-      candidates.push(appInfo.exePath);
-    }
   }
 
-  // 2. 如果 project.binFolder 存在，提取其中的 exe
+  // 2. 补充 Locator 探测到的最新绝对路径（防止缓存路径因版本更新失效）
+  const appInfo = ideLocator.findAppForProject(project);
+  if (appInfo && appInfo.exePath && !candidates.includes(appInfo.exePath)) {
+    candidates.push(appInfo.exePath);
+  }
+
+  // 3. 如果 project.binFolder 存在，提取其中的 exe
   if (project.binFolder && typeof project.binFolder === "string") {
-    // 替换 $APPLICATION_HOME_DIR$
     const cleanBin = project.binFolder.replace(/^\$APPLICATION_HOME_DIR\$/, "").replace(/^[\\/]+/, "");
-    // 如果有默认名，拼接
     const defaultExes = project.executables || ["idea64.exe"];
     for (const exeName of defaultExes) {
-      candidates.push(exeName);
+      if (!candidates.includes(exeName)) {
+        candidates.push(exeName);
+      }
     }
   }
 
-  // 3. 从预设注册表中获取候选可执行文件名
+  // 4. 从预设注册表中获取候选可执行文件名
   if (Array.isArray(project.executables)) {
     for (const exe of project.executables) {
       if (!candidates.includes(exe)) {
@@ -185,7 +213,7 @@ function getWindowsExecutableCandidates(project) {
     }
   }
 
-  // 4. 默认保底
+  // 5. 默认保底
   if (!candidates.includes("idea64.exe")) {
     candidates.push("idea64.exe");
   }

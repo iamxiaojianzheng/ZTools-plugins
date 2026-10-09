@@ -4,9 +4,13 @@
   "title": "JetBrains 项目启动器",
   "description": "扫描本机已安装的 JetBrains IDE，聚合各 IDE 最近打开的项目，支持模糊搜索与一键启动",
   "author": "zl",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "pluginType": "ui",
-  "platform": ["win32", "darwin", "linux"],
+  "platform": [
+    "win32",
+    "darwin",
+    "linux"
+  ],
   "preload": "preload.js",
   "logo": "logo.png",
   "permissions": [

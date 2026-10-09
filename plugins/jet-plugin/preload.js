@@ -458,35 +458,24 @@
           for (const exe of candidateExecutables) {
             try {
               console.log(`[Executor] \u5C1D\u8BD5\u6267\u884C\u53EF\u6267\u884C\u6587\u4EF6:`, exe);
-              await ruck.shell.execute(exe, [projectPath]);
+              await launchGuiApplication(ruck.shell, exe, [projectPath], "win32");
               launched = true;
               break;
             } catch (execErr) {
               console.warn(`[Executor] \u6267\u884C ${exe} \u5931\u8D25:`, execErr.message);
             }
           }
-          if (!launched) {
-            console.log(`[Executor] \u542F\u52A8\u5668\u76F4\u63A5\u6267\u884C\u672A\u6210\u529F\uFF0C\u964D\u7EA7\u901A\u8FC7\u7CFB\u7EDF\u5173\u8054\u6253\u5F00:`, projectPath);
-            try {
-              await ruck.shell.openPath(projectPath);
-              launched = true;
-            } catch (openErr) {
-              console.warn(`[Executor] \u7CFB\u7EDF\u5173\u8054\u6253\u5F00\u4EA6\u5931\u8D25:`, openErr.message);
-            }
-          }
         } else {
           const candidateExecutables = project.executables || ["idea", "webstorm", "pycharm"];
-          let launched2 = false;
           for (const exe of candidateExecutables) {
             try {
-              await ruck.shell.execute(exe, [projectPath]);
-              launched2 = true;
+              console.log(`[Executor] \u5C1D\u8BD5\u6267\u884C\u53EF\u6267\u884C\u6587\u4EF6:`, exe);
+              await launchGuiApplication(ruck.shell, exe, [projectPath], "linux");
+              launched = true;
               break;
             } catch (e) {
+              console.warn(`[Executor] \u6267\u884C ${exe} \u5931\u8D25:`, e.message);
             }
-          }
-          if (!launched2) {
-            await ruck.shell.openPath(projectPath);
           }
         }
       } else {
@@ -498,7 +487,7 @@
         return true;
       } else {
         console.warn(`[Executor] \u672A\u80FD\u6210\u529F\u62C9\u8D77\u542F\u52A8\u5668\uFF0C\u4FDD\u6301\u7A97\u53E3\u4EE5\u4FBF\u6392\u67E5`);
-        showNotice(`\u672A\u627E\u5230\u53EF\u7528\u7684 ${project.ideName || "IDE"} \u542F\u52A8\u5668`);
+        showNotice(`\u672A\u627E\u5230\u53EF\u7528\u7684 ${project.ideName || "IDE"} \u542F\u52A8\u5668\uFF0C\u8BF7\u68C0\u67E5\u5B89\u88C5\u8DEF\u5F84`);
         return false;
       }
     } catch (error) {
@@ -507,21 +496,47 @@
       return false;
     }
   }
+  async function launchGuiApplication(shell, program, args = [], platform = "win32") {
+    if (!shell) {
+      throw new Error("\u5F53\u524D\u73AF\u5883\u672A\u63D0\u4F9B\u6709\u6548\u7684 shell \u6267\u884C\u5668");
+    }
+    if (platform === "win32") {
+      try {
+        console.log(`[Executor] \u4F18\u5148\u5C1D\u8BD5\u901A\u8FC7 cmd.exe start \u8131\u79BB\u62C9\u8D77:`, program);
+        await shell.execute("cmd.exe", ["/c", "start", "", program, ...args]);
+        return true;
+      } catch (cmdErr) {
+        console.warn(`[Executor] cmd.exe \u8131\u79BB\u62C9\u8D77\u5F02\u5E38\uFF0C\u5C1D\u8BD5\u5907\u7528\u94FE\u8DEF:`, cmdErr.message);
+      }
+    }
+    if (typeof shell.spawn === "function") {
+      console.log(`[Executor] \u4F7F\u7528 ruck.shell.spawn \u5F02\u6B65\u975E\u963B\u585E\u62C9\u8D77:`, program);
+      await shell.spawn(program, args);
+      return true;
+    }
+    if (typeof shell.execute === "function") {
+      console.log(`[Executor] \u4F7F\u7528 ruck.shell.execute \u515C\u5E95\u62C9\u8D77:`, program);
+      await shell.execute(program, args);
+      return true;
+    }
+    throw new Error("\u672A\u80FD\u627E\u5230\u53EF\u7528\u7684\u8FDB\u7A0B\u542F\u52A8\u63A5\u53E3");
+  }
   function getWindowsExecutableCandidates(project) {
     const candidates = [];
     if (project.launchExecutable) {
       candidates.push(project.launchExecutable);
-    } else {
-      const appInfo = ideLocator.findAppForProject(project);
-      if (appInfo && appInfo.exePath) {
-        candidates.push(appInfo.exePath);
-      }
+    }
+    const appInfo = ideLocator.findAppForProject(project);
+    if (appInfo && appInfo.exePath && !candidates.includes(appInfo.exePath)) {
+      candidates.push(appInfo.exePath);
     }
     if (project.binFolder && typeof project.binFolder === "string") {
       const cleanBin = project.binFolder.replace(/^\$APPLICATION_HOME_DIR\$/, "").replace(/^[\\/]+/, "");
       const defaultExes = project.executables || ["idea64.exe"];
       for (const exeName of defaultExes) {
-        candidates.push(exeName);
+        if (!candidates.includes(exeName)) {
+          candidates.push(exeName);
+        }
       }
     }
     if (Array.isArray(project.executables)) {
