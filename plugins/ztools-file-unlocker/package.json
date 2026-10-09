@@ -1,6 +1,6 @@
 {
   "name": "@ruck-plugins/ztools-file-unlocker",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "description": "ZTools / Ruck 插件 - 查找并解除被占用文件，支持解锁、解锁并删除/重命名/移动、批量处理",
   "scripts": {

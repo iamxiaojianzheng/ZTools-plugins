@@ -3,7 +3,7 @@
   "title": "文件解锁器",
   "pluginName": "文件解锁器",
   "description": "查找并解除被占用文件，支持解锁、解锁并删除/重命名/移动、批量处理",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "zhanglei",
   "pluginType": "ui",
   "main": "index.html",
@@ -13,6 +13,8 @@
   "permissions": [
     {
       "shell_execute": [
+        "bin/unlocker-helper.exe",
+        "bin\\unlocker-helper.exe",
         "unlocker-helper.exe",
         "taskkill.exe",
         "taskkill",
