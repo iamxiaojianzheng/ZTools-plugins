@@ -29,6 +29,7 @@
     return typeof window !== "undefined" && window.ruck ? window.ruck : null;
   }
   var KNOWN_CODES = [
+    "home",
     "identity",
     "password",
     "number",
@@ -182,12 +183,10 @@
       },
       // 生命周期与 Action 智能纠偏
       onPluginEnter(callback) {
-        let enterTriggered = false;
         const wrappedCallback = (action = {}) => {
-          enterTriggered = true;
           const normalized = { ...action };
           if (!normalized.code || normalized.code === "default" || normalized.code === "main" || !KNOWN_CODES.includes(normalized.code)) {
-            normalized.code = "identity";
+            normalized.code = "home";
           }
           if (!normalized.type) {
             normalized.type = "text";
@@ -196,7 +195,6 @@
             normalized.payload = "";
           }
           lastAction = normalized;
-          console.log(`[Devbox] onPluginEnter dispatching code: "${normalized.code}", type: "${normalized.type}"`);
           if (typeof callback === "function") {
             callback(normalized);
           }
@@ -207,11 +205,6 @@
         } else if (ruck?.on) {
           ruck.on("plugin-enter", wrappedCallback);
         }
-        setTimeout(() => {
-          if (!enterTriggered) {
-            wrappedCallback({ code: "identity", type: "text", payload: "" });
-          }
-        }, 80);
       },
       onPluginOut(callback) {
         const ruck = getRuck();

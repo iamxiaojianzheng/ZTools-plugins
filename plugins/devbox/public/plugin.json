@@ -8,7 +8,7 @@
   ],
   "description": "开发百宝箱，提供随机生成、Base64 编解码、URL 编解码、加密签名、二维码、文本压缩、文本转换、JSON 工具、开发辅助等常用工具集",
   "author": "咖啡八杯",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "index.html",
   "preload": "preload.js",
   "logo": "logo.png",
@@ -25,7 +25,9 @@
       "code": "home",
       "explain": "打开开发百宝箱首页",
       "icon": "logo.png",
-      "cmds": ["devbox"]
+      "cmds": [
+        "devbox"
+      ]
     },
     {
       "code": "identity",

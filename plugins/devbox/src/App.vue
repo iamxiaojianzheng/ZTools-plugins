@@ -115,22 +115,20 @@ onMounted(async () => {
 
   ztools.setExpendHeight(600)
 
-  // 【修复】宿主在插件隐藏时会重载开发插件的视图（重跑 preload 并替换 window.ztools），
-  // 导致已注册的 enter 回调失效，后续 onPluginEnter 事件被宿主缓冲、不再派发
-  // （表现为重进插件停留在上次的标签页）。定时重注册保证回调始终挂在最新的宿主接口
-  // 对象上；注册动作本身会触发宿主回放缓冲的 enter 事件，重进即可正确激活对应标签。
+  // 注册 enter 事件：Ruck SDK 会在挂载时自动回放启动事件
   const registerEnter = () => {
-    // 每次都从 window 上重新取 ztools——重跑 preload 后旧引用不再是宿主当前使用的接口对象
     ;(window as any).ztools?.onPluginEnter?.(handlePluginEnter)
   }
 
   registerEnter()
-  setInterval(registerEnter, 800)
 
-  // 页面由不可见变为可见时（部分宿主版本通过可见性触发重载）也补一次注册
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') registerEnter()
-  })
+  // 页面重新可见时（如窗口再次唤醒）做幂等保底注册
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      registerEnter()
+    }
+  }
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 
   ztools.onPluginOut(() => {
     // 插件只是隐藏到后台：保留 route 与全部标签状态，下次进入无缝恢复

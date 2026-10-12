@@ -12,6 +12,7 @@ function getRuck() {
 
 // 开发百宝箱已知合法业务 Feature Codes
 const KNOWN_CODES = [
+  "home",
   "identity",
   "password",
   "number",
@@ -179,20 +180,17 @@ export function createZtoolsBridge() {
 
     // 生命周期与 Action 智能纠偏
     onPluginEnter(callback) {
-      let enterTriggered = false;
-
       const wrappedCallback = (action = {}) => {
-        enterTriggered = true;
         const normalized = { ...action };
 
-        // 核心纠偏：杜绝 default / main 或未匹配 code 导致页面无选定工具
+        // 核心纠偏：若没有提供合法 code 或为 main/default，回退为 home
         if (
           !normalized.code ||
           normalized.code === "default" ||
           normalized.code === "main" ||
           !KNOWN_CODES.includes(normalized.code)
         ) {
-          normalized.code = "identity";
+          normalized.code = "home";
         }
 
         if (!normalized.type) {
@@ -203,7 +201,6 @@ export function createZtoolsBridge() {
         }
 
         lastAction = normalized;
-        console.log(`[Devbox] onPluginEnter dispatching code: "${normalized.code}", type: "${normalized.type}"`);
         if (typeof callback === "function") {
           callback(normalized);
         }
@@ -215,13 +212,6 @@ export function createZtoolsBridge() {
       } else if (ruck?.on) {
         ruck.on("plugin-enter", wrappedCallback);
       }
-
-      // 80ms 冷启动保底：若无宿主事件投递，自动触发默认主视图
-      setTimeout(() => {
-        if (!enterTriggered) {
-          wrappedCallback({ code: "identity", type: "text", payload: "" });
-        }
-      }, 80);
     },
 
     onPluginOut(callback) {
