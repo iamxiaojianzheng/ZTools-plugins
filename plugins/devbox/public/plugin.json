@@ -22,6 +22,12 @@
   },
   "features": [
     {
+      "code": "home",
+      "explain": "打开开发百宝箱首页",
+      "icon": "logo.png",
+      "cmds": ["devbox"]
+    },
+    {
       "code": "identity",
       "explain": "随机生成虚拟身份信息（姓名、身份证号、手机号、地址等），支持批量和导出",
       "icon": "logo.png",

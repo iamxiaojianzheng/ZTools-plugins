@@ -11,13 +11,12 @@ export function getPlatform(): any {
   return window.platform || (window as any).ztools || (window as any).utools || null;
 }
 
-//  localStorage key 前缀 
 const STORAGE_PREFIX = 'color_helper_';
 
 // 环境检测
 export const isPlatform = typeof window !== 'undefined' && !!(window.platform || (window as any).ztools || (window as any).utools);
 
-//  dbStorage 适配 
+//  dbStorage 适配
 export const dbStorage = {
   getItem(key: string): any {
     const platform = getPlatform();
@@ -55,7 +54,7 @@ export const dbStorage = {
   },
 };
 
-//  db 适配 
+//  db 适配
 export const db = {
   get(id: string): any {
     const platform = getPlatform();
@@ -70,10 +69,17 @@ export const db = {
     }
   },
 
-  put(doc: any): { ok: boolean; id: string; rev?: string; error?: string } {
+  put(doc: any): { ok: boolean; id: string; rev?: string; error?: unknown } {
     const platform = getPlatform();
     if (platform?.db) {
-      return platform.db.put(doc);
+      // 平台分支返回 DbReturn(ok 可选、error 是布尔), 归一化成与降级分支一致的形状
+      const r = platform.db.put(doc);
+      return {
+        ok: r.ok !== false && !r.error,
+        id: r.id,
+        rev: r.rev,
+        error: r.error ? (r.message ?? r.name ?? 'db.put failed') : undefined,
+      };
     }
     try {
       const id = doc._id;
@@ -81,88 +87,114 @@ export const db = {
       const rev = existing?._rev ? String(parseInt(existing._rev || '0') + 1) : '1';
       const toSave = { ...doc, _rev: rev };
       localStorage.setItem(`${STORAGE_PREFIX}db_${id}`, JSON.stringify(toSave));
-      return { ok: true, id, rev };
+      return { ok: true, id, rev, error: undefined };
     } catch (e: any) {
-      return { ok: false, id: doc._id, error: e.message };
+      return { ok: false, id: doc?._id, error: e?.message ?? e };
     }
   },
 
-  remove(doc: any): { ok: boolean; error?: string } {
+  remove(doc: any): { ok: boolean; error?: unknown } {
     const platform = getPlatform();
     if (platform?.db) {
-      return platform.db.remove(doc);
+      const r = platform.db.remove(doc);
+      return {
+        ok: r.ok !== false && !r.error,
+        error: r.error ? (r.message ?? r.name ?? 'db.remove failed') : undefined,
+      };
     }
     try {
       localStorage.removeItem(`${STORAGE_PREFIX}db_${doc._id}`);
       return { ok: true };
-    } catch (e: any) {
-      return { ok: false, error: e.message };
+    } catch (e) {
+      return { ok: false, error: e };
     }
   },
 
   allDocs(key?: string): any[] {
     const platform = getPlatform();
     if (platform?.db) {
-      return platform.db.allDocs(key);
+      try {
+        return platform.db.allDocs(key) ?? [];
+      } catch {
+        return [];
+      }
     }
+    const results: any[] = [];
     try {
-      const results: any[] = [];
       const prefix = `${STORAGE_PREFIX}db_`;
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && k.startsWith(prefix)) {
-          const v = localStorage.getItem(k);
-          if (v) {
-            const doc = JSON.parse(v);
-            if (!key || doc._id.startsWith(key)) {
-              results.push(doc);
-            }
+        if (k?.startsWith(prefix)) {
+          const doc = JSON.parse(localStorage.getItem(k) || '{}');
+          if (!key || doc._id?.startsWith(key)) {
+            results.push(doc);
           }
         }
       }
-      return results;
-    } catch {
-      return [];
-    }
+    } catch { /* ignore */ }
+    return results;
   },
 };
 
 // 剪贴板
+
+/** execCommand 回退: 非安全上下文(非 https / file)或 clipboard API 被拒时使用 */
+function copyTextFallback(text: string): void {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+}
+
 export function copyText(text: string): void {
   const platform = getPlatform();
   if (platform?.copyText) {
     platform.copyText(text);
     return;
   }
+  // navigator.clipboard.writeText() 返回 Promise: API 不存在时同步抛、
+  // 权限被拒时异步 reject —— 同步 try/catch 只接得住前者,
+  // 两处都要落到 copyTextFallback 才算覆盖完整。
+  const clipboard = navigator.clipboard;
+  if (!clipboard?.writeText) {
+    copyTextFallback(text);
+    return;
+  }
   try {
-    navigator.clipboard.writeText(text);
+    clipboard.writeText(text).catch(() => copyTextFallback(text));
   } catch {
-    // fallback: textarea copy
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
+    copyTextFallback(text);
   }
 }
 
-export function copyImage(dataUrl: string): void {
+/** 复制图片到剪贴板(仅平台支持); 浏览器无对等 API, 降级为下载
+ *  浏览器不静默丢弃, 否则按钮点击后毫无反应 */
+export function copyImage(dataUrl: string, filename = 'image.png'): void {
   const platform = getPlatform();
   if (platform?.copyImage) {
     platform.copyImage(dataUrl);
     return;
   }
-  console.warn('[fallback] copyImage not supported in browser');
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 // 屏幕截图
-export function screenCapture(callback: (imagePath: string) => void): void {
+// 回调第二参 bounds 仅 Windows / Linux 有值(macOS 为 undefined)
+export function screenCapture(
+  callback: (imgBase64: string, bounds?: { x: number; y: number; width: number; height: number }) => void,
+): void {
   const platform = getPlatform();
-  if ((platform as any)?.screenCapture) {
-    (platform as any).screenCapture(callback);
+  if (platform?.screenCapture) {
+    platform.screenCapture(callback);
     return;
   }
   console.warn('[fallback] screenCapture not supported in browser');
@@ -210,8 +242,6 @@ export function onPluginEnter(callback: (action: { code: string; type: string; p
     platform.onPluginEnter(callback);
     return;
   }
-  // 非平台环境: 直接触发一次模拟进入
-  setTimeout(() => callback({ code: 'color', type: 'text', payload: '' }), 100);
 }
 
 export function onPluginOut(callback: () => void): void {
@@ -222,24 +252,32 @@ export function onPluginOut(callback: () => void): void {
   }
 }
 
-//  AI API 
+//  AI API
 export function isAIAvailable(): boolean {
   const platform = getPlatform();
   const ruck = typeof window !== 'undefined' ? (window as any).ruck : null;
-  return !!(ruck?.ai?.chat || ((platform as any)?.ai && typeof (platform as any).ai === 'function'));
+  return !!(ruck?.ai?.chat || (platform?.ai && typeof platform.ai === 'function'));
 }
 
-export async function aiChat(messages: { role: string; content: string }[], model: string = 'doubao-1.5-pro-32k'): Promise<{ content: string }> {
+/**
+ * @param model 留空时宿主会选用用户已配置的默认模型(本地供应商优先)。
+ *   传了宿主解析不出来的 ID 会直接报「未找到 AI 模型配置」, 所以一般不要传。
+ *   确需指定时, 用 `allAiModels()` 取列表并回传其中的 id / value。
+ */
+export async function aiChat(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  model?: string,
+): Promise<{ role?: string; content?: string }> {
   if (!isAIAvailable()) {
     throw new Error('当前版本不支持 AI 功能');
   }
   const platform = getPlatform();
-  if ((platform as any)?.ai) {
-    return (platform as any).ai({ model, messages });
+  if (platform?.ai && typeof platform.ai === 'function') {
+    return platform.ai({ model, messages });
   }
   const ruck = typeof window !== 'undefined' ? (window as any).ruck : null;
   if (ruck?.ai?.chat) {
-    const rawModel = (model.startsWith('doubao-') || !model.trim()) ? '' : model.trim();
+    const rawModel = (model && (model.startsWith('doubao-') || !model.trim())) ? '' : (model?.trim() || '');
     const request = {
       model: rawModel,
       messages: messages.map(m => ({ role: m.role || 'user', content: String(m.content || '') }))
@@ -262,6 +300,7 @@ export async function aiChat(messages: { role: string; content: string }[], mode
 }
 
 // 文件对话框
+// 宿主侧弹窗是异步的, 返回值可能是 undefined, 调用方必须容错。
 export function showOpenDialog(options: any): string[] | undefined {
   const platform = getPlatform();
   if (platform?.showOpenDialog) {
