@@ -1,13 +1,20 @@
 {
   "$schema": "node_modules/@ztools-center/ztools-api-types/resource/ztools.schema.json",
-  "name": "regex-editor",
+  "name": "@ruck-plugins/regex-editor",
+  "pluginType": "ui",
   "title": "正则可视编辑器",
   "description": "正则可视化编辑器：铁路图可视化、实时匹配测试、AI 大白话说明、常用范例、按需求 AI 生成正则",
   "author": "adoin",
   "version": "1.0.0",
   "main": "index.html",
-  "preload": "preload/services.js",
+  "preload": "preload.js",
   "logo": "logo.png",
+  "ai": true,
+  "permissions": [
+    "clipboard_read",
+    "clipboard_write",
+    "window_control"
+  ],
   "development": {
     "main": "http://localhost:5173"
   },

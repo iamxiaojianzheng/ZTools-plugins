@@ -177,7 +177,7 @@ async function handleCopy() {
           </div>
           <p v-if="aiError" class="ai-error">{{ aiError }}</p>
           <p v-if="!aiAvailable && pattern" class="ai-hint">
-            未配置 AI 时使用本地规则解释；在 ZTools 设置中配置模型后可启用 AI 大白话说明。
+            未配置 AI 时使用本地规则解释；在宿主设置中配置模型后可启用 AI 大白话说明。
           </p>
 
           <div class="ai-generate">
