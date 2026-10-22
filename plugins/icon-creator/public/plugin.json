@@ -1,13 +1,22 @@
 {
   "$schema": "node_modules/@ztools-center/ztools-api-types/resource/ztools.schema.json",
-  "name": "icon-creator",
+  "name": "@ruck-plugins/icon-creator",
+  "pluginType": "ui",
   "title": "图标创建工具",
   "description": "可视化图标设计工具，支持图层编辑、样式预设和 PNG/SVG 多格式导出",
   "author": "皮皮虾我们走",
   "version": "1.0.0",
   "main": "index.html",
-  "preload": "preload/services.js",
+  "preload": "preload.js",
   "logo": "logo.png",
+  "permissions": [
+    "file_system_write",
+    "file_system_read",
+    "system_info",
+    "clipboard_read",
+    "clipboard_write",
+    "window_control"
+  ],
   "development": {
     "main": "http://localhost:3000"
   },

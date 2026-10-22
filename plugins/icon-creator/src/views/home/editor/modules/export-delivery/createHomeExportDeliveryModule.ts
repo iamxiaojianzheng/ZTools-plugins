@@ -813,20 +813,46 @@ export function createHomeExportDeliveryModule(
         const path = await exportAllArtboardsZip(prefix, pngSizes)
         if (path) paths.push(path)
       } else {
-        if (exportDialog.svgEnabled) {
-          const path = await exportSVG(`${prefix}.svg`, exportDialog.svgIncludeBg)
-          if (path) paths.push(path)
-        }
-        if (exportDialog.pngEnabled) {
-          pngSizes.forEach((size) => {
-            const path = exportPNG(size, `${prefix}-${size}.png`, exportDialog.transparentBg)
+        const totalItemsCount = (exportDialog.svgEnabled ? 1 : 0) + (exportDialog.pngEnabled ? pngSizes.length : 0)
+
+        if (totalItemsCount > 1) {
+          // 批量多尺寸/多格式：自动归集打包为 ZIP 压缩包，弹出 1 次原生保存对话框
+          const zip = new JSZip()
+          if (exportDialog.svgEnabled) {
+            const svgText = await createOptimizedSVG(exportDialog.svgIncludeBg)
+            zip.file(`${prefix}.svg`, svgText)
+          }
+          if (exportDialog.pngEnabled) {
+            for (const size of pngSizes) {
+              const normalizedSize = normalizeExportPngSize(size) ?? options.exportWorkflow.canvasWidth.value
+              const dataUrl = renderPNGDataUrl(normalizedSize, exportDialog.transparentBg)
+              if (dataUrl) {
+                const base64 = dataUrl.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, '')
+                zip.file(`${prefix}-${size}.png`, base64, { base64: true })
+              }
+            }
+          }
+          const blob = await zip.generateAsync({ type: 'blob' })
+          const savedPath = await window.services?.writeZipFile?.(blob, `${prefix}-icons.zip`)
+          if (savedPath) {
+            paths.push(savedPath)
+          }
+        } else {
+          // 单文件导出：直接唤起对应单文件的原生另存为对话框
+          if (exportDialog.svgEnabled) {
+            const path = await exportSVG(`${prefix}.svg`, exportDialog.svgIncludeBg)
             if (path) paths.push(path)
-          })
+          }
+          if (exportDialog.pngEnabled && pngSizes.length === 1) {
+            const size = pngSizes[0]
+            const path = await exportPNG(size, `${prefix}-${size}.png`, exportDialog.transparentBg)
+            if (path) paths.push(path)
+          }
         }
       }
       exportDialog.status = paths.length
         ? `导出成功：\n${paths.join('\n')}`
-        : '导出失败：未生成任何文件。'
+        : '已取消保存'
     } catch (error) {
       exportDialog.status = error instanceof Error ? error.message : '导出失败'
     } finally {
