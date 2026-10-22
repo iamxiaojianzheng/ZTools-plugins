@@ -16,7 +16,11 @@ function copyPluginAssets(): Plugin {
     closeBundle() {
       const root = path.dirname(fileURLToPath(import.meta.url));
       const dist = path.join(root, "dist");
-      fs.copyFileSync(path.join(root, "plugin.json"), path.join(dist, "plugin.json"));
+      // dist 的 plugin.json 必须去掉 development 覆盖：
+      // 否则开发模式安装 dist 时会强制加载 localhost:5173，发布包也不应携带该字段
+      const manifest = JSON.parse(fs.readFileSync(path.join(root, "plugin.json"), "utf-8"));
+      delete manifest.development;
+      fs.writeFileSync(path.join(dist, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
       fs.copyFileSync(path.join(root, "logo.png"), path.join(dist, "logo.png"));
       // 复制 CHANGELOG.md / README.md（发布校验需要 dist 内含有效更新日志）
       for (const f of ["CHANGELOG.md", "README.md"]) {

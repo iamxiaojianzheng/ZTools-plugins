@@ -137,7 +137,7 @@
       fitText();
       return;
     }
-    var chg = q.chg !== undefined && q.chg !== null ? q.chg : (q.price !== null && q.prevClose ? q.price - q.prevClose : 0);
+    var chg = q.change !== undefined && q.change !== null ? q.change : (q.price !== null && q.prevClose ? q.price - q.prevClose : 0);
     setBallClass(chg > 0 ? 'profit' : (chg < 0 ? 'loss' : 'flat'));
     setText(elMain, fmtProfit(chg));
     setText(elSub, fmtPct(q.pct));
@@ -154,6 +154,9 @@
     return refreshPending;
   }
   function refreshImpl() {
+    // 两条子链路都在内部兜底（reject 被吃掉变 null/[]），外层 Promise.all 永不 reject；
+    // 失败必须靠 anyFail 标记传出来，否则 failCount 恒 0，断网徽标与退避重试永不生效
+    var anyFail = false;
     var pPos = Promise.resolve().then(function () {
       return (S.positions && S.positions.get) ? S.positions.get() : null;
     }).then(function (pos) {
@@ -162,7 +165,7 @@
         render();
       }
       return pos;
-    }).catch(function () { return null; });
+    }).catch(function () { anyFail = true; return null; });
 
     var pQuotes = Promise.resolve().then(function () {
       return S.quotes ? S.quotes() : [];
@@ -173,16 +176,21 @@
         render();
       }
       return list;
-    }).catch(function () { return []; });
+    }).catch(function () { anyFail = true; return []; });
 
     return Promise.all([pPos, pQuotes]).then(function (res) {
-      failCount = 0;
-      lastOkAt = Date.now();
+      if (anyFail) {
+        failCount += 1;
+      } else {
+        failCount = 0;
+        lastOkAt = Date.now();
+      }
+      render();
+      if (anyFail) setTimeout(refresh, Math.min(20000, 3000 * failCount));
       return res;
-    }).catch(function (err) {
+    }).catch(function () {
       failCount += 1;
       render();
-      setTimeout(refresh, Math.min(20000, 3000 * failCount));
     });
   }
 
@@ -213,15 +221,16 @@
   var drag = null;
   var lastClickTime = 0;
   var lastOpenPluginTime = 0;
+  var lastDragTime = 0;
+  var dragSeq = 0;
 
   /*
    * 拖动两条路径（老实现的卡顿有两个来源，这里各治一个）：
    *  1) 快速路径：宿主允许 electron.remote 时，球窗口直接 setBounds 移动自己，零 IPC，
    *     跟手度等同系统原生拖动。老实现每帧要走「球→IPC→主窗口→setBounds」，
    *     而主窗口此时多半是隐藏的（进插件就 hideMainWindow），渲染进程被节流，越拖越滞。
-   *  2) IPC 路径：起手先等主窗口 ack（它要异步取一次窗口基准 bounds），ack 之前
-   *     的位移只记账不发送，ack 到达立刻冲刷最新一帧。老实现是直接丢弃这段位移 ——
-   *     起手几十毫秒的移动凭空消失，球要等你多拖一段才动，就是那句「拖着有点卡」。
+   *  2) IPC 路径：起手后立即发送位移，主窗口用同步 bounds 或已知位置作为基准。
+   *     每次手势有独立标识，旧手势的延迟消息和异步快照不会干扰下一次拖动。
    */
   var nativeWin = null;
   try {
@@ -247,7 +256,7 @@
     if (d.startBounds) {
       // 快速路径：起手 bounds 是按下瞬间同步读到的，一并交给主窗口，它无需再异步取
       d.ready = true;
-      if (S.host && S.host.drag) S.host.drag('start', 0, 0, d.startBounds);
+      if (S.host && S.host.drag) S.host.drag('start', 0, 0, d.startBounds, d.gesture);
       return;
     }
     // 立即开火：主窗口侧有 pendingDragMove/end 缓冲，start 先到后到都能接住，
@@ -255,9 +264,9 @@
     // 表现就是「有时候拖不动」。ack 只作确认，不再参与门控
     d.ready = true;
     if (S.host && typeof S.host.dragStart === 'function') {
-      S.host.dragStart(); // 起手+ack，返回值不再 gating
+      S.host.dragStart(null, d.gesture); // 起手+ack，返回值不再 gating
     } else if (S.host && S.host.drag) {
-      S.host.drag('start', 0, 0);
+      S.host.drag('start', 0, 0, null, d.gesture);
     }
   }
 
@@ -272,13 +281,13 @@
         return;
       } catch (e) { nativeWin = null; d.startBounds = null; } // 快速路径失效就退回 IPC
     }
-    if (d.ready && S.host && S.host.drag) S.host.drag('move', d.lastDx, d.lastDy);
-    // 未 ready：位移记在 lastDx/lastDy，ack 到达后由 startDrag 冲刷，一个像素都不丢
+    if (d.ready && S.host && S.host.drag) S.host.drag('move', d.lastDx, d.lastDy, null, d.gesture);
   }
 
   function onPointerDown(e) {
-    if (e.button !== 0) return;
-    drag = { sx: e.screenX, sy: e.screenY, moved: false, id: e.pointerId, lastDx: 0, lastDy: 0, raf: 0, ready: false, startBounds: null };
+    if (e.button !== 0 || e.isPrimary === false) return;
+    if (drag) finishPointer(null, true);
+    drag = { sx: e.screenX, sy: e.screenY, moved: false, id: e.pointerId, gesture: Date.now() + ':' + (++dragSeq), lastDx: 0, lastDy: 0, raf: 0, ready: false, startBounds: null };
     drag.startBounds = readNativeBounds();
     isDragging = true;
     needRender = false;
@@ -298,23 +307,36 @@
     drag.lastDx = dx;
     drag.lastDy = dy;
     if (!drag.raf) {
-      drag.raf = requestAnimationFrame(function () {
-        if (!drag) return;
-        drag.raf = 0;
-        moveDrag(drag);
+      var d = drag;
+      d.raf = requestAnimationFrame(function () {
+        if (drag !== d) return;
+        d.raf = 0;
+        moveDrag(d);
       });
     }
   }
   function onPointerUp(e) {
+    if (e.button !== 0) return;
+    finishPointer(e, false);
+  }
+  function finishPointer(e, cancelled) {
     if (!drag) return;
+    if (e && e.pointerId !== undefined && e.pointerId !== drag.id) return;
     var d = drag;
     drag = null;
+    if (d.raf) cancelAnimationFrame(d.raf);
     ball.classList.remove('dragging');
     isDragging = false;
-    try { ball.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    try { ball.releasePointerCapture(d.id); } catch (err) { /* ignore */ }
     if (d.moved) {
-      if (S.host && S.host.drag) S.host.drag('end', d.lastDx, d.lastDy, d.startBounds);
-    } else {
+      lastDragTime = Date.now();
+      if (!cancelled && e && isFinite(e.screenX) && isFinite(e.screenY)) {
+        d.lastDx = e.screenX - d.sx;
+        d.lastDy = e.screenY - d.sy;
+      }
+      if (d.startBounds) moveDrag(d);
+      if (S.host && S.host.drag) S.host.drag('end', d.lastDx, d.lastDy, d.startBounds, d.gesture);
+    } else if (!cancelled) {
       var now = Date.now();
       if (now - lastClickTime < 450) {
         lastClickTime = 0;
@@ -322,7 +344,7 @@
       } else {
         lastClickTime = now;
       }
-    }
+    } else lastClickTime = 0;
     if (needRender) { needRender = false; render(); }
   }
 
@@ -348,18 +370,21 @@
   ball.addEventListener('pointerdown', onPointerDown);
   ball.addEventListener('pointermove', onPointerMove);
   ball.addEventListener('pointerup', onPointerUp);
-  ball.addEventListener('pointercancel', onPointerUp);
-  ball.addEventListener('dblclick', function (e) {
+  function cancelPointer(e) { finishPointer(e, true); }
+  ball.addEventListener('pointercancel', cancelPointer);
+  ball.addEventListener('lostpointercapture', cancelPointer);
+  window.addEventListener('blur', function () { finishPointer(null, true); lastClickTime = 0; });
+  function onDoubleClick(e) {
     e.preventDefault();
     e.stopPropagation();
-    openZToolsPlugin();
-  });
-  window.addEventListener('dblclick', function (e) {
-    e.preventDefault();
-    e.stopPropagation();
-    openZToolsPlugin();
-  });
-  document.addEventListener('pointermove', function (e) { if (drag && !e.screenX && !e.screenY) onPointerMove(e); });
+    if (!drag && Date.now() - lastDragTime >= 450) openZToolsPlugin();
+  }
+  ball.addEventListener('dblclick', onDoubleClick);
+  window.addEventListener('dblclick', onDoubleClick);
+  // 捕获失败或窗口移动导致指针离开球时，继续接收整页的移动与松手。
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', cancelPointer);
 
   window.addEventListener('wheel', function (e) {
     nextStock(e.deltaY > 0 ? 1 : -1);

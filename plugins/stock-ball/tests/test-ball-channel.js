@@ -51,7 +51,7 @@ const dbMap = new Map();
 const sendToCalls = [];    // 子 → 宿主：要求 hostId 已知
 const parentCalls = [];    // 子 → 父：Z.sendToParent 兜底路径
 
-function makeBallCtx() {
+function makeBallCtx(api) {
   const src = fs.readFileSync(path.join(PLUGIN_DIR, 'preload.js'), 'utf8');
   const handlers = [];
   const ipc = {
@@ -75,6 +75,7 @@ function makeBallCtx() {
     outPlugin() {}, hideMainWindow() {},
     createBrowserWindow: () => null, onPluginEnter() {}, onPluginOut() {}
   };
+  Object.assign(ztools, api || {});
   const sandbox = {
     window: win, ztools, utools: ztools,
     location: { href: 'file:///plugin/windows/ball.html', pathname: '/windows/ball.html' },
@@ -172,6 +173,7 @@ function mkEl(id) {
 }
 
 function runBallPage(services) {
+  const windowEvents = mkEl('window');
   const html = fs.readFileSync(path.join(PLUGIN_DIR, 'windows', 'ball.html'), 'utf8');
   const ids = [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
   const registry = new Map();
@@ -187,7 +189,7 @@ function runBallPage(services) {
     requestAnimationFrame: (fn) => setTimeout(() => fn(Date.now()), 0),
     cancelAnimationFrame: (id) => clearTimeout(id),
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
-    addEventListener() {}, removeEventListener() {}, dispatchEvent() {}
+    addEventListener: (t, fn) => windowEvents.addEventListener(t, fn), removeEventListener() {}, dispatchEvent() {}
   };
   const sandbox = {
     window: win, self: win, document,
@@ -211,7 +213,7 @@ function runBallPage(services) {
   try {
     vm.runInContext(fs.readFileSync(path.join(PLUGIN_DIR, 'windows', 'ball.js'), 'utf8'), sandbox, { filename: 'ball.js' });
   } catch (e) { err = e; }
-  return { err, registry };
+  return { err, registry, windowEvents };
 }
 
 (async () => {
@@ -267,6 +269,73 @@ function runBallPage(services) {
   ok(pre.includes("if (ROLE !== 'main' && senderId)"), '入站 hostId 刷新逻辑在位');
   ok(!bal.includes('ready 之前不发'), 'ball.js 不再有「等 ack 才发 move」的门控');
   ok(bal.includes('立即开火'), 'ball.js 起手即发注释在位');
+
+  console.log('== 6. 失联时直接唤起：先等待窗口显示，再跳转 ==');
+  const opened = [];
+  let finishShow;
+  const orphan = makeBallCtx({
+    sendToParent: undefined,
+    showMainWindow: () => { opened.push('show'); return new Promise((resolve) => { finishShow = resolve; }); },
+    redirect: (cmd) => { opened.push(cmd); return true; }
+  });
+  const opening = orphan.services.host.openPlugin('stock');
+  await sleep(750);
+  ok(opened.join(',') === 'show', '主窗口无响应时调用宿主 API，显示完成前不跳转', opened);
+  if (finishShow) finishShow();
+  await opening;
+  ok(opened.join(',') === 'show,stock', '显示完成后直接进入 stock 插件', opened);
+  const replayBefore = sendToCalls.filter((c) => c.msg.t === 'open-plugin').length;
+  orphan.handlers.forEach((fn) => fn({ senderId: 88 }, { t: 'hello' }));
+  ok(sendToCalls.filter((c) => c.msg.t === 'open-plugin').length === replayBefore, '连接恢复后不重放已超时的打开请求');
+  let rejectedRequest;
+  let fallbackCalls = 0;
+  const rejected = makeBallCtx({
+    sendToParent: (ch, msg) => { rejectedRequest = msg; },
+    showMainWindow: async () => {},
+    redirect: () => { fallbackCalls++; return true; }
+  });
+  const rejectedOpen = rejected.services.host.openPlugin('stock');
+  rejected.handlers.forEach((fn) => fn({ senderId: 89 }, { t: 'ack', for: rejectedRequest.mid, ok: false }));
+  await rejectedOpen;
+  ok(fallbackCalls === 1, '主窗口明确返回失败时也执行直接唤起');
+
+  console.log('== 7. 捕获丢失和取消不能被当作双击 ==');
+  const messages = [];
+  let opens = 0;
+  const interaction = runBallPage({ host: {
+    drag: (...args) => messages.push(args),
+    openPlugin: () => { opens++; }
+  } });
+  const el = interaction.registry.get('ball');
+  const pointer = (x, y, id = 1) => ({ button: 0, pointerId: id, screenX: x, screenY: y });
+  el.fire('pointerdown', pointer(100, 100));
+  el.fire('pointerup', pointer(100, 100));
+  el.fire('pointerdown', pointer(100, 100));
+  el.fire('pointercancel', pointer(100, 100));
+  ok(opens === 0, '取消事件不计作第二次单击');
+  el.fire('pointerdown', pointer(100, 100));
+  interaction.windowEvents.fire('pointermove', pointer(150, 140));
+  el.fire('pointerup', pointer(150, 140, 2));
+  ok(el.classList.contains('dragging'), '其他指针的松手不结束当前拖动');
+  interaction.windowEvents.fire('pointerup', pointer(160, 150));
+  ok(!el.classList.contains('dragging'), '球外松手可清理拖动状态');
+  const end = messages.find((m) => m[0] === 'end');
+  ok(end && end[1] === 60 && end[2] === 50, '最后一帧尚未执行也保留松手终点', end);
+  el.fire('dblclick');
+  ok(opens === 0, '拖动结束后的浏览器 dblclick 不会误开插件');
+  el.fire('pointerdown', pointer(100, 100));
+  el.fire('lostpointercapture', pointer(100, 100));
+  ok(!el.classList.contains('dragging'), '丢失捕获可恢复交互');
+  el.fire('pointerdown', pointer(100, 100));
+  interaction.windowEvents.fire('blur');
+  ok(!el.classList.contains('dragging'), '窗口失焦可恢复交互');
+  await sleep(460);
+  el.fire('pointerdown', pointer(100, 100));
+  el.fire('pointerup', pointer(100, 100));
+  el.fire('pointerdown', pointer(100, 100));
+  el.fire('pointerup', pointer(100, 100));
+  el.fire('dblclick');
+  ok(opens === 1, '恢复后双击仍可打开插件，原生与手动检测只打开一次', opens);
 
   console.log('');
   if (fail === 0) {

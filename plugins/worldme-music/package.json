@@ -1,0 +1,24 @@
+{
+  "name": "worldme-music",
+  "version": "1.1.1",
+  "description": "插件化、可定制的音乐播放器。不内置任何音源，加载兼容 MusicFree 协议的音源即可搜索歌曲 / 专辑 / 歌手 / 歌单，浏览榜单，在线播放并显示逐行歌词与桌面歌词，支持导入、下载、收藏与播放队列。",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build && node scripts/post-build.js",
+    "typecheck": "vue-tsc --noEmit",
+    "gen:logo": "node scripts/gen-logo.cjs"
+  },
+  "dependencies": {
+    "hls.js": "^1.5.17",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@ztools-center/ztools-api-types": "^1.0.1",
+    "typescript": "^5.3.0",
+    "vite": "^6.0.11",
+    "vue-tsc": "^2.0.0"
+  }
+}

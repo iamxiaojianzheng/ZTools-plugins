@@ -4,6 +4,7 @@
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "build": "pnpm --filter @pasteboard-pro/atools build && pnpm --filter @pasteboard-pro/ztools build",
+    "publish": "ztools publish",
     "benchmark:search": "node scripts/benchmark-pasteboardpro.mjs",
     "test": "vitest run",
     "test:release-archive": "node scripts/test-release-archive.mjs",

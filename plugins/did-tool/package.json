@@ -1,6 +1,6 @@
 {
   "name": "did-tool",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Docker 镜像下载工具，支持在本地无 Docker 环境下通过 HTTP 请求直接下载镜像文件，可使用代理进行加速下载，遇到网络不便的服务器可在本地下载镜像后上传至服务器进行载入",
   "author": "hanzhe",
   "license": "MIT",

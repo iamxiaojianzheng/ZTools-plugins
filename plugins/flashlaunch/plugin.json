@@ -1,0 +1,28 @@
+{
+  "name": "flashlaunch",
+  "title": "闪启",
+  "description": "闪启是一款轻量、便捷的快捷启动工具，支持集中管理软件、文件、文件夹和常用网址。提供拖拽添加、自定义别名、快捷搜索、图标获取、启动参数及数据备份等功能。无需反复查找，常用资源在 ZTools 中一键直达。",
+  "author": "qingfeng",
+  "version": "1.0.0",
+  "main": "index.html",
+  "logo": "logo.png",
+  "preload": "preload.js",
+  "platform": ["win32"],
+  "features": [
+    {
+      "code": "fl-panel",
+      "explain": "打开闪启面板",
+      "cmds": ["闪启", "flashlaunch", "fl"]
+    },
+    {
+      "code": "fl-apps",
+      "explain": "打开应用面板",
+      "cmds": ["闪启应用"]
+    },
+    {
+      "code": "fl-webs",
+      "explain": "打开网址面板",
+      "cmds": ["闪启网址"]
+    }
+  ]
+}

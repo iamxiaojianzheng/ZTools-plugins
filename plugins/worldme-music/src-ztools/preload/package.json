@@ -1,0 +1,19 @@
+{
+  "name": "worldme-music-preload",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Worldme Music preload runtime dependencies (MusicFree plugin protocol compatibility)",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "0.27.2",
+    "big-integer": "1.6.51",
+    "cheerio": "1.0.0-rc.12",
+    "crypto-js": "4.2.0",
+    "dayjs": "1.11.4",
+    "he": "1.2.0",
+    "http-proxy-agent": "5.0.0",
+    "https-proxy-agent": "5.0.1",
+    "qs": "6.11.0",
+    "webdav": "5.3.1"
+  }
+}

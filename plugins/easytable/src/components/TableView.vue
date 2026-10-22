@@ -1,19 +1,25 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+import type { TableInstance } from 'element-plus'
 import type { FieldDef, FieldValue, FilterCond, FilterOp, Row, TableSchema } from '../types/table'
 import {
   CREATED_AT_FIELD_ID,
   UPDATED_AT_FIELD_ID,
   hasOptions
 } from '../types/table'
-import { displayValue, defaultValue, searchTextOf, backfillField, coerceRowsToFields, addFieldOptions, collectFieldOptions } from '../domain/fieldTypes'
+import { displayValue, defaultValue, searchTextOf, backfillField, coerceRowsToFields, coerceFieldValue, batchSetFieldValue, addFieldOptions, collectFieldOptions } from '../domain/fieldTypes'
+import {
+  cellTextOf,
+  estimateColumnWidth,
+  isValidColumnWidth,
+  pruneColumnWidths
+} from '../domain/columnWidth'
 import {
   filterableFields,
   opsForField,
   matchAll
 } from '../domain/filters'
-import { formatTimestamp } from '../utils/time'
 import { rowsToCsv, rowsToTsv } from '../domain/codec/tableCodec'
 import { toBackup, serializeBackup } from '../domain/codec/jsonBackup'
 import { copyText, openExternal } from '../utils/copy'
@@ -21,6 +27,7 @@ import { useStore } from '../composables/useStore'
 import RowFormDrawer from './RowFormDrawer.vue'
 import FieldManagerDialog from './FieldManagerDialog.vue'
 import ImportDialog from './ImportDialog.vue'
+import BatchEditDialog from './BatchEditDialog.vue'
 import type { BackupFile } from '../types/table'
 import { parseBackup } from '../domain/codec/jsonBackup'
 
@@ -43,11 +50,14 @@ const {
   importBackupTables,
   collectAllRows,
   setRowHeightMode,
+  setColumnWidths,
   backfillRows,
   replaceRows
 } = store
 
 const keyword = ref('')
+/** 表格实例：勾选状态由 el-table 自己持有（列上开了 reserve-selection），清空必须走它 */
+const gridRef = ref<TableInstance>()
 const sortFieldId = ref<string | null>(null)
 const sortDir = ref<'asc' | 'desc'>('asc')
 const selectedIds = ref<Set<string>>(new Set())
@@ -55,6 +65,8 @@ const showRowForm = ref(false)
 const editingRow = ref<Row | null>(null)
 const showFieldMgr = ref(false)
 const showImport = ref(false)
+const showBatchEdit = ref(false)
+const batchApplying = ref(false)
 /** 高级筛选：AND 条件组（替代旧的单字段筛选） */
 const filters = ref<FilterCond[]>([])
 const filterOpen = ref(false)
@@ -152,6 +164,16 @@ const pageRows = computed(() => {
   return filteredRows.value.slice(start, start + pageSize.value)
 })
 
+/**
+ * 批量修改的作用范围：勾选过就只改勾选的（取当前列表内的交集，避免改到看不见的行），
+ * 没勾选则视为全部 —— 即当前列表里的所有行（有筛选时就是筛选结果）。
+ */
+const batchTargetRows = computed(() => {
+  const list = filteredRows.value
+  if (!selectedIds.value.size) return list
+  return list.filter((r) => selectedIds.value.has(r.id))
+})
+
 watch(
   [
     keyword,
@@ -179,22 +201,66 @@ const allSelected = computed({
   }
 })
 
-function toggleSelect(id: string) {
-  const next = new Set(selectedIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selectedIds.value = next
-}
-
 function cellText(field: FieldDef, row: Row): string {
-  if (field.id === CREATED_AT_FIELD_ID) return formatTimestamp(row.createdAt)
-  if (field.id === UPDATED_AT_FIELD_ID) return formatTimestamp(row.updatedAt)
-  return displayValue(field, row.values[field.id], multiSeparator.value)
+  return cellTextOf(field, row, multiSeparator.value)
 }
 
 function multiTags(field: FieldDef, row: Row): string[] {
   const v = row.values[field.id]
   return Array.isArray(v) ? v : []
+}
+
+/** 估算默认列宽的采样行数：只看前 N 行，大表不必为了量宽度整表扫一遍 */
+const WIDTH_SAMPLE_ROWS = 300
+
+/** 按内容长度估算的默认列宽：没手动拖过的列用它当 min-width */
+const autoWidths = computed<Record<string, number>>(() => {
+  const sample = activeRows.value.slice(0, WIDTH_SAMPLE_ROWS)
+  const map: Record<string, number> = {}
+  for (const f of displayFields.value) {
+    map[f.id] = estimateColumnWidth(f, sample, multiSeparator.value)
+  }
+  return map
+})
+
+/** 手动拖动记下的列宽；没记过或值不合法时返回 undefined（回到自适应） */
+function manualWidth(id: string): number | undefined {
+  const w = activeTable.value?.columnWidths?.[id]
+  return isValidColumnWidth(w) ? Math.round(w) : undefined
+}
+
+/**
+ * 拖动列宽：记到当前表上，下次打开沿用。
+ * 没拖过的列保持 min-width，由 el-table 按内容比例分配剩余宽度。
+ */
+function onHeaderDragend(newWidth: number, _oldWidth: number, column: { property?: string }) {
+  const table = activeTable.value
+  const id = column?.property
+  if (!table || typeof id !== 'string' || !displayFields.value.some((f) => f.id === id)) return
+  const w = Math.round(newWidth)
+  if (!Number.isFinite(w) || w <= 0) return
+  setColumnWidths(table.id, { ...(table.columnWidths ?? {}), [id]: w })
+}
+
+/** 清掉记下的列宽，回到「按内容自适应」 */
+function resetColumnWidths() {
+  const table = activeTable.value
+  if (!table) return
+  if (!Object.keys(table.columnWidths ?? {}).length) {
+    ElMessage.info('列宽已是按内容自适应')
+    return
+  }
+  setColumnWidths(table.id, {})
+  ElMessage.success('列宽已恢复为按内容自适应')
+}
+
+/**
+ * 悬停提示内容：默认取单元格 innerText，标签会被粘成一串，
+ * 这里统一用展示文本（多值按分隔符连接），和「复制/导出」看到的一致。
+ */
+function colTooltip({ row, column }: { row: Row; column: { property?: string } }): string {
+  const f = displayFields.value.find((x) => x.id === column?.property)
+  return f ? cellText(f, row) : ''
 }
 
 function openUrl(url: string) {
@@ -258,8 +324,67 @@ async function onDeleteSelected() {
     return
   }
   deleteRows(table.id, [...selectedIds.value])
-  selectedIds.value = new Set()
+  resetSelection()
   ElMessage.success('已删除')
+}
+
+/** 打开批量修改：没勾选视为全部，范围的说明交给对话框展示 */
+function openBatchEdit() {
+  const table = activeTable.value
+  if (!table) return
+  if (!table.fields.length) {
+    ElMessage.info('当前表还没有字段，请先在「表设置」里添加字段')
+    return
+  }
+  if (!batchTargetRows.value.length) {
+    ElMessage.warning(
+      selectedIds.value.size ? '勾选的记录不在当前列表里' : '当前没有可修改的记录'
+    )
+    return
+  }
+  showBatchEdit.value = true
+}
+
+/** 批量修改：把范围内的记录某字段统一改成同一个值（对话框已确认过字段与值） */
+async function onBatchApply(fieldId: string, rawValue: FieldValue) {
+  if (batchApplying.value) return
+  const table = activeTable.value
+  const field = table?.fields.find((f) => f.id === fieldId)
+  if (!table || !field) return
+  const targetIds = new Set(batchTargetRows.value.map((r) => r.id))
+  if (!targetIds.size) return
+  // 按字段类型归一化，保证存下的值和界面显示的一致
+  const value = coerceFieldValue(field, rawValue)
+  const shown = displayValue(field, value, multiSeparator.value) || '（空）'
+  const label = shown.length > 30 ? `${shown.slice(0, 30)}…` : shown
+  batchApplying.value = true
+  try {
+    try {
+      await ElMessageBox.confirm(
+        `将 ${targetIds.size} 条记录的「${field.name}」改为「${label}」。此操作不可撤销。`,
+        '批量修改',
+        { type: 'warning', confirmButtonText: '修改', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+    showBatchEdit.value = false
+    const result = batchSetFieldValue(activeRows.value, fieldId, value, targetIds)
+    if (!result) {
+      ElMessage.info(`这些记录的「${field.name}」已经是该值`)
+      return
+    }
+    // 新值若是单选/多选里的新选项，一并收进字段选项
+    if (addFieldOptions(field, value)) {
+      updateTableSchema({ ...table, fields: [...table.fields] })
+    }
+    await replaceRows(table.id, result.rows)
+    ElMessage.success(`已修改 ${result.changedRows} 条记录`)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '批量修改失败')
+  } finally {
+    batchApplying.value = false
+  }
 }
 
 async function copySelectedAsTsv(includeHeader = true) {
@@ -386,7 +511,8 @@ async function importJsonBackup() {
 }
 
 function onSaveSchema(schema: TableSchema) {
-  updateTableSchema(schema)
+  // 字段被删掉后，它的列宽记录一并清掉
+  updateTableSchema(pruneColumnWidths(schema))
   // 清掉引用了已删除字段的条件（系统时间列不受影响）
   const validIds = new Set(schema.fields.map((f) => f.id))
   filters.value = filters.value.filter(
@@ -459,7 +585,7 @@ async function onRemoveTable() {
       type: 'warning'
     })
     removeTable(t.id)
-    selectedIds.value = new Set()
+    resetSelection()
     ElMessage.success('已删除表格')
   } catch {
     // 取消
@@ -512,7 +638,7 @@ async function onClearTable() {
   await new Promise<void>((r) => setTimeout(r, 0)) // 让 loading 先渲染
   try {
     const n = await clearTableRows(t.id)
-    selectedIds.value = new Set()
+    resetSelection()
     ElMessage.success(`已清空表「${t.name}」，删除 ${n} 条记录`)
   } catch (e: any) {
     ElMessage.error(e?.message || '清空失败')
@@ -538,8 +664,10 @@ function onExportCommand(cmd: string | number | object) {
 function onMoreCommand(cmd: string | number | object) {
   const c = String(cmd)
   if (c === 'fields') showFieldMgr.value = true
+  else if (c === 'batch') openBatchEdit()
   else if (c === 'rowheight-fixed') setRowHeightMode('fixed')
   else if (c === 'rowheight-auto') setRowHeightMode('auto')
+  else if (c === 'colwidth-reset') resetColumnWidths()
   else if (c === 'clear') onClearTable()
   else if (c === 'delete') onRemoveTable()
 }
@@ -633,7 +761,12 @@ const quickConds = computed(() => [
   { fieldId: UPDATED_AT_FIELD_ID, op: 'thisWeek' as FilterOp, label: '本周更新' }
 ])
 
-function clearSelection() {
+/**
+ * 清空勾选：必须连 el-table 内部持有的勾选状态一起清（选择列开了 reserve-selection，
+ * 只把 selectedIds 置空的话，勾选框还留着，之后新勾一行会把残留记录一起算进已选）。
+ */
+function resetSelection() {
+  gridRef.value?.clearSelection()
   selectedIds.value = new Set()
 }
 
@@ -641,7 +774,7 @@ function clearSelection() {
 watch(
   () => activeTable.value?.id,
   () => {
-    selectedIds.value = new Set()
+    resetSelection()
     filters.value = []
     filterOpen.value = false
     sortFieldId.value = null
@@ -817,6 +950,7 @@ defineExpose({ applyEnterAction })
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="fields">表设置（字段 / 表名）</el-dropdown-item>
+              <el-dropdown-item command="batch">批量修改字段…</el-dropdown-item>
               <el-dropdown-item command="rowheight-fixed">
                 <span class="rowheight-item">
                   {{ rowHeightMode === 'fixed' ? '✓' : '' }} 固定行高（超出省略）
@@ -827,6 +961,7 @@ defineExpose({ applyEnterAction })
                   {{ rowHeightMode === 'auto' ? '✓' : '' }} 自适应行高（随内容撑高）
                 </span>
               </el-dropdown-item>
+              <el-dropdown-item command="colwidth-reset">列宽重置为自动</el-dropdown-item>
               <el-dropdown-item command="clear" divided>清空当前表（仅记录）</el-dropdown-item>
               <el-dropdown-item command="delete" divided>删除当前表</el-dropdown-item>
             </el-dropdown-menu>
@@ -836,15 +971,17 @@ defineExpose({ applyEnterAction })
 
       <div v-if="selectedIds.size" class="select-bar">
         <span class="select-count">已选 {{ selectedIds.size }} 条</span>
+        <el-button link type="primary" size="small" @click="openBatchEdit">批量修改</el-button>
         <el-button link type="primary" size="small" @click="copySelectedAsTsv(true)">
           复制到 Excel
         </el-button>
         <el-button link type="danger" size="small" @click="onDeleteSelected">删除</el-button>
-        <el-button link size="small" @click="clearSelection">取消选择</el-button>
+        <el-button link size="small" @click="resetSelection">取消选择</el-button>
       </div>
 
       <div class="grid-wrap">
         <el-table
+          ref="gridRef"
           :data="pageRows"
           height="100%"
           size="small"
@@ -854,6 +991,7 @@ defineExpose({ applyEnterAction })
           @selection-change="(rows: Row[]) => { selectedIds = new Set(rows.map((r) => r.id)) }"
           @row-dblclick="(row: Row) => openEdit(row)"
           @sort-change="onSortChange"
+          @header-dragend="onHeaderDragend"
         >
           <el-table-column type="selection" width="40" align="center" :reserve-selection="true" />
           <el-table-column label="操作" width="110" align="center" fixed="left">
@@ -867,10 +1005,13 @@ defineExpose({ applyEnterAction })
             :key="f.id"
             :prop="f.id"
             :label="f.name"
-            :min-width="110"
+            :width="manualWidth(f.id)"
+            :min-width="manualWidth(f.id) ? undefined : autoWidths[f.id]"
             align="center"
             header-align="center"
             sortable="custom"
+            show-overflow-tooltip
+            :tooltip-formatter="colTooltip"
             :sort-orders="['ascending', 'descending', null]"
           >
             <template #default="{ row }">
@@ -943,6 +1084,14 @@ defineExpose({ applyEnterAction })
       v-model:visible="showImport"
       :table="activeTable ?? { id: '', name: '', fields: [], createdAt: 0, updatedAt: 0 }"
       :multi-separator="multiSeparator"
+    />
+    <BatchEditDialog
+      v-model:visible="showBatchEdit"
+      :table="activeTable ?? { id: '', name: '', fields: [], createdAt: 0, updatedAt: 0 }"
+      :targets="batchTargetRows"
+      :from-selection="selectedIds.size > 0"
+      :rows="activeRows"
+      @apply="onBatchApply"
     />
   </div>
 </template>

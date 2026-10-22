@@ -44,6 +44,8 @@ const activeSource = computed(
     null
 )
 
+const sourceIsGhcr = computed(() => /^(?:https?:\/\/)?ghcr\.io\/?$/i.test(activeSource.value?.url.trim() || ''))
+
 watch(
   () => props.settings,
   (settings) => {
@@ -315,6 +317,10 @@ function validateSettings(settings: AppSettings): string {
               />
             </div>
           </div>
+
+          <p v-if="sourceIsGhcr" class="source-auth-hint">
+            公开镜像无需填写认证；私有镜像请填写 GitHub 用户名，并在密码中填写具有 read:packages 权限的个人访问令牌（经典）。
+          </p>
 
           <button
             type="button"
@@ -819,6 +825,14 @@ function validateSettings(settings: AppSettings): string {
 
 .source-core-fields {
   padding: 16px 14px;
+}
+
+.source-auth-hint {
+  margin: 0;
+  padding: 0 14px 14px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 17px;
 }
 
 .authentication-toggle {

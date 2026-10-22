@@ -68,6 +68,13 @@ function getLocalDateStr(ts) {
   return `${y}-${m}-${day}`;
 }
 
+/** 代码 → 东财 secid 的市场段：6/5/9 开头沪市；920 开头是北交所新代码段（东财同样归 0 段） */
+function guessSecid(code) {
+  const c = String(code || '');
+  if (/^920\d{3}$/.test(c)) return '0.' + c;
+  return (/^[659]/.test(c) ? '1.' : '0.') + c;
+}
+
 function createStore(injectedDb, options) {
   const opts = options || {};
   let dataFilePath = '';
@@ -81,6 +88,15 @@ function createStore(injectedDb, options) {
   let txVersion = 1;
   let posCoreMemo = null; // { v, today, core }
   let closedMemo = null;  // { v, list }
+
+  // 流水 id：毫秒×1000 + 进程序号，同一毫秒批量导入也不重复。
+  //（旧实现 Date.now()+random(0-999)，同一毫秒导入几十条时高概率撞号，
+  // 而 deleteTransaction 按 id 过滤，会把撞号的另一条一起删掉）
+  let txIdSeq = 0;
+  function nextTxId() {
+    txIdSeq = (txIdSeq + 1) % 1000;
+    return Date.now() * 1000 + txIdSeq;
+  }
 
   if (!opts.isolated) {
     try {
@@ -246,7 +262,7 @@ function createStore(injectedDb, options) {
         const amt = price * qty;
         const totalPrice = Number(t.total_price != null ? t.total_price : amt);
         return {
-          id: t.id || (Date.now() + Math.floor(Math.random() * 1000)),
+          id: t.id || nextTxId(),
           created_at: t.created_at ? new Date(t.created_at).toISOString() : new Date().toISOString(),
           stock_code: code,
           stock_name: name,
@@ -270,7 +286,7 @@ function createStore(injectedDb, options) {
       let addedWlCount = 0;
       for (const [code, name] of Object.entries(stockNameMap)) {
         if (!existingCodes.has(code)) {
-          const secid = (/^[659]/.test(code) ? '1.' : '0.') + code;
+          const secid = guessSecid(code);
           curWl.push({ code, secid, name, group: '默认' });
           existingCodes.add(code);
           addedWlCount++;
@@ -320,7 +336,7 @@ function createStore(injectedDb, options) {
       .filter((x) => x && (x.code || x.secid))
       .map((x) => {
         const code = String(x.code || x.secid).replace(/[^\d]/g, '').slice(0, 6);
-        const secid = x.secid && /^[01]\./.test(String(x.secid)) ? String(x.secid) : (/^[659]/.test(code) ? '1.' : '0.') + code;
+        const secid = x.secid && /^[01]\./.test(String(x.secid)) ? String(x.secid) : guessSecid(code);
         return { code, secid, name: x.name || code, group: String(x.group || '默认').trim() || '默认' };
       });
   }
@@ -330,7 +346,7 @@ function createStore(injectedDb, options) {
       .filter((x) => x && (x.code || x.secid))
       .map((x) => {
         const code = String(x.code || x.secid).replace(/[^\d]/g, '').slice(0, 6);
-        const secid = x.secid && /^[01]\./.test(String(x.secid)) ? String(x.secid) : (/^[659]/.test(code) ? '1.' : '0.') + code;
+        const secid = x.secid && /^[01]\./.test(String(x.secid)) ? String(x.secid) : guessSecid(code);
         return { code, secid, name: x.name || code, group: String(x.group || '默认').trim() || '默认' };
       });
     return set(K.watchlist, cleaned);
@@ -408,7 +424,9 @@ function createStore(injectedDb, options) {
     const s = Object.assign({}, DEFAULT_SETTINGS, raw);
     s.refreshSec = clampInt(s.refreshSec, 2, 120, DEFAULT_SETTINGS.refreshSec);
     s.rotateSec = clampInt(s.rotateSec, 2, 120, DEFAULT_SETTINGS.rotateSec);
-    if (!raw.ballSize || raw.ballSize <= 56) {
+    // 56 是宣传范围内的合法下限（悬浮球大小 56–110px 可调），不能当旧默认值迁移成 72：
+    // 否则设置页调到 56 后每次读取都被改回 72，球端 4 秒设置轮询会把球面拉出 68px 的窗口
+    if (raw.ballSize === undefined || raw.ballSize === null || raw.ballSize === '') {
       s.ballSize = DEFAULT_SETTINGS.ballSize;
     } else {
       s.ballSize = clampInt(s.ballSize, 56, 110, DEFAULT_SETTINGS.ballSize);
@@ -501,8 +519,10 @@ function createStore(injectedDb, options) {
     const type = (Number(tx.type) === 1 || String(tx.type) === 'buy') ? 1 : 2; // 1: 买入, 2: 卖出
 
     const pureCode = String(tx.stock_code || '').toLowerCase().replace(/^(sh|sz)/, '').replace(/[^\d]/g, '');
-    const isETF = pureCode.startsWith('51') || pureCode.startsWith('15');
-    const isShanghai = pureCode.startsWith('6') || pureCode.startsWith('51') || pureCode.startsWith('688');
+    // 场内基金（ETF/LOF/封基，免印花税、佣金费率独立）：沪市 5 开头（50/51/56/58），深市 15/16。
+    // 旧判定只认 51/15，导致 588/56 开头的沪市 ETF 卖出被错收印花税、过户费也算成深市口径
+    const isETF = /^5/.test(pureCode) || /^1[56]/.test(pureCode);
+    const isShanghai = /^[56]/.test(pureCode);
 
     // 佣金（万分之）
     const commRate = isETF ? Number(s.etfCommissionRate) : Number(s.stockCommissionRate);
@@ -583,7 +603,7 @@ function createStore(injectedDb, options) {
       throw new Error('买卖股数必须是 100 的整数倍');
     }
     const all = get(K.transactions, []) || [];
-    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const id = nextTxId();
     const feeInfo = calculateFees(tx);
     const item = Object.assign({}, tx, {
       id,

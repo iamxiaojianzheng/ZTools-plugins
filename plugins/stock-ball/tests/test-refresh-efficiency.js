@@ -140,7 +140,7 @@ function buildCtx(id) {
   ok(preJs.includes('merged') && preJs.includes('markSharedQuotes'), '记档并集逻辑在位');
   ok(idxJs.includes('visibilitychange') && panJs.includes('visibilitychange'), '主窗口/小窗：隐藏停链、回前台补拉');
   ok(idxJs.includes('if (document.hidden) return;') && panJs.includes('if (document.hidden) return;'), 'loopRefresh 隐藏时不下一轮');
-  ok(idxJs.includes('if (!document.hidden) setTimeout(refresh') && panJs.includes('if (!document.hidden) setTimeout(refresh'), '失败重试不进隐藏期（防后台永续轮询）');
+  ok(idxJs.includes('if (anyFail && !document.hidden) setTimeout(refresh') && panJs.includes('if (anyFail && !document.hidden) setTimeout(refresh'), '失败重试不进隐藏期（防后台永续轮询）');
   ok(idxJs.includes('if (!document.hidden) updateBallBtnState()'), '悬浮球按钮状态轮询跳过隐藏期');
   ok(balJs.includes('__fitKey') && balJs.includes('function setText') && balJs.includes('function setBallClass'),
     '悬浮球幂等渲染：内容没变零 DOM、零强制布局');

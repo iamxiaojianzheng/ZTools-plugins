@@ -450,6 +450,14 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
   } catch (e) { dtErr = e; }
   ok(!dtErr, '打开交易明细弹窗并渲染柱状图不抛异常', dtErr && (dtErr.message + '\n' + String(dtErr.stack).split('\n')[1]));
   ok(hvReg.get('dtModal').hidden === false, '交易明细弹窗已打开');
+  // 流水时间必须按本地时区显示（created_at 是 UTC，直切字符串会比实际早8小时）
+  {
+    const txD = new Date('2026-01-10T02:00:00.000Z');
+    const txPad = (n) => (n < 10 ? '0' + n : '' + n);
+    const txExp = txD.getFullYear() + '-' + txPad(txD.getMonth() + 1) + '-' + txPad(txD.getDate()) + ' ' + txPad(txD.getHours()) + ':' + txPad(txD.getMinutes());
+    const dtHtml = String(hvReg.get('dtList').innerHTML);
+    ok(dtHtml.indexOf(txExp) >= 0, '流水时间按本地时区显示 ' + txExp, dtHtml.slice(0, 400));
+  }
   ok(tipEl.hidden === true, '刚打开时详情浮层是隐藏的');
 
   // 在指定坐标模拟鼠标移动，返回浮层是否可见
@@ -518,6 +526,35 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
   probe(c1, 100);
   hv.win.fire('mousemove', { clientX: c1, clientY: 300 });
   ok(tipEl.hidden === true, '鼠标纵向移出画布（在图表下方）浮层也隐藏');
+
+  console.log('== 7. 交易明细概览条：累计T盈亏 ==');
+  const tServices = buildPreloadContext('file:///plugin/index.html', {
+    'sb.transactions': [
+      { id: 951, stock_code: '600000', stock_name: 'T口径测试', type: 1, price: 10, quantity: 1000, amount: 10000, total_price: 10000, created_at: '2026-01-05T01:30:00.000Z' },
+      // T 日 1：当天买 100@11 卖 100@12 → T 盈亏 +100
+      { id: 952, stock_code: '600000', stock_name: 'T口径测试', type: 1, price: 11, quantity: 100, amount: 1100, total_price: 1100, created_at: '2026-01-06T01:30:00.000Z' },
+      { id: 953, stock_code: '600000', stock_name: 'T口径测试', type: 2, price: 12, quantity: 100, amount: 1200, total_price: 1200, created_at: '2026-01-06T03:30:00.000Z' },
+      // T 日 2：当天买 100@10 卖 100@9.5 → T 盈亏 -50
+      { id: 954, stock_code: '600000', stock_name: 'T口径测试', type: 1, price: 10, quantity: 100, amount: 1000, total_price: 1000, created_at: '2026-01-07T01:30:00.000Z' },
+      { id: 955, stock_code: '600000', stock_name: 'T口径测试', type: 2, price: 9.5, quantity: 100, amount: 950, total_price: 950, created_at: '2026-01-07T03:30:00.000Z' },
+      // 纯减仓日：不算 T（减仓已实现盈亏 +105 不计入累计T）
+      { id: 956, stock_code: '600000', stock_name: 'T口径测试', type: 2, price: 11, quantity: 100, amount: 1100, total_price: 1100, created_at: '2026-01-08T03:30:00.000Z' }
+    ]
+  });
+  const tBoot = runWindowScript('index.js', 'index.html', tServices, 'main-tcum');
+  ok(!tBoot.err, '累计T测试的主窗口启动不抛异常', tBoot.err && tBoot.err.message);
+  await sleep(250);
+  const tReg = tBoot.dom.registry;
+  const tRows = tReg.get('posList').querySelectorAll('.posTableRow');
+  const tCard = tRows.filter((c) => c.getAttribute('data-code') === '600000')[0];
+  ok(!!tCard, '持仓表里找到了 T 口径测试股票', tRows.map((c) => c.getAttribute('data-code')).join(','));
+  tCard.querySelector('[data-act="detail"]').fire('click');
+  await sleep(150);
+  const tSum = String(tReg.get('dtSummary').innerHTML);
+  ok(tSum.indexOf('累计T盈亏') >= 0, '概览条显示累计T盈亏', tSum);
+  ok(tSum.indexOf('+50.00元') >= 0, '累计T盈亏 = +50.00（+100 与 -50 两次对倒加总）', tSum);
+  ok(tSum.indexOf('（T 2 次）') >= 0, '标注 T 的次数（纯减仓日不计）', tSum);
+  ok(tSum.indexOf('class="up"') >= 0, '盈利为红色（up）', tSum);
 
   console.log('');
   if (fail === 0) {

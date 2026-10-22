@@ -175,7 +175,8 @@ function openExternalUrl(rawUrl) {
   if (!opened) {
     try { window.open(u, '_blank'); } catch (e) { /* ignore */ }
   }
-  return u;
+  // 返回是否已在本地成功唤起：调用方据此决定要不要请主窗口兜底再开一次
+  return opened ? u : '';
 }
 
 /* ---------------- 开机自动启动（跟随 ZTools 主程序） ----------------
@@ -256,6 +257,25 @@ function claimAlertNotify(cdKey, coolKey, now, intervalMs) {
   return true;
 }
 
+/*
+ * 预警通知出口：只有主窗口（IS_HOST）有权认领冷却坑位并弹通知。
+ * 旧实现每个窗口各自「读冷却表 → 认领 → 写回」：主窗口和悬浮球的刷新定时器同相，
+ * 同一秒内两个窗口都读到空的冷却表、各自认领成功 → 一条预警稳定双弹（用户实测必现）。
+ * 现在子窗口只做本地预检（冷却期内连消息都不发），冷却期外转发给主窗口，
+ * 由主窗口单线程读写冷却表 —— 天然不重复。
+ */
+function fireAlertNotification(cdKey, cooldowns, now, intervalMs, title, body) {
+  if (IS_HOST) {
+    if (!claimAlertNotify(cdKey, cooldowns, now, intervalMs)) return;
+    store.setAlertCooldowns(cooldowns);
+    sendDesktopNotification(title, body);
+    return;
+  }
+  const last = Number(cooldowns[cdKey]) || 0;
+  if (last && (now - last) < intervalMs) return;
+  toHost({ t: 'alert-fire', k: cdKey, intervalMs: intervalMs, title: title, body: body });
+}
+
 function sendDesktopNotification(title, body) {
   try {
     if (typeof Z !== 'undefined' && typeof Z.showNotification === 'function') {
@@ -276,6 +296,14 @@ function sendDesktopNotification(title, body) {
   } catch (e) { /* ignore */ }
 }
 
+/* 价格显示口径：ETF/可转债/低价股是三位小数（1.057），截成两位会算错金额。
+   < 10 元用 3 位，>= 10 元用 2 位（与 index.js / panel.js 的 fmtPrice 一致） */
+function fmtAlertPrice(v) {
+  const n = Number(v);
+  if (!isFinite(n)) return '--';
+  return n < 10 ? n.toFixed(3) : n.toFixed(2);
+}
+
 function isTradingTime(now) {
   if (market && typeof market.isTradingTime === 'function') {
     return market.isTradingTime(now);
@@ -286,12 +314,12 @@ function isTradingTime(now) {
   const day = d.getDay();
   const hhmm = d.getHours() * 100 + d.getMinutes();
   if (day === 0 || day === 6) return false;
-  return (hhmm >= 930 && hhmm <= 1130) || (hhmm >= 1300 && hhmm <= 1500);
+  return (hhmm >= 910 && hhmm <= 1130) || (hhmm >= 1300 && hhmm <= 1500);
 }
 
 function evaluateAlerts(quotesMap, options) {
   const opts = options || {};
-  // 非交易时间段（周末、早盘盘前 <9:30、午间休市 11:30~13:00、盘后 >15:00）静默防打扰，不弹出股票通知
+  // 非交易时间段（周末、早盘盘前 <9:10、午间休市 11:30~13:00、盘后 >15:00）静默防打扰，不弹出股票通知
   if (!opts.ignoreTradingTime && !isTradingTime(opts.currentTime)) {
     return;
   }
@@ -317,50 +345,30 @@ function evaluateAlerts(quotesMap, options) {
 
     // 1. 股价高于目标
     if (alert.high_price > 0 && !isNaN(price) && price >= alert.high_price) {
-      const k = code + '_high_price';
-      if (claimAlertNotify(k, cooldowns, now, intervalMs)) {
-        store.setAlertCooldowns(cooldowns);
-        sendDesktopNotification(
-          '【股价预警】' + name + '(' + code + ')',
-          '突破目标高价！最新价: ¥' + price.toFixed(2) + ' (目标: >=¥' + alert.high_price.toFixed(2) + ')'
-        );
-      }
+      fireAlertNotification(code + '_high_price', cooldowns, now, intervalMs,
+        '【股价预警】' + name + '(' + code + ')',
+        '突破目标高价！最新价: ¥' + fmtAlertPrice(price) + ' (目标: >=¥' + fmtAlertPrice(alert.high_price) + ')');
     }
 
     // 2. 股价低于目标
     if (alert.low_price > 0 && !isNaN(price) && price <= alert.low_price) {
-      const k = code + '_low_price';
-      if (claimAlertNotify(k, cooldowns, now, intervalMs)) {
-        store.setAlertCooldowns(cooldowns);
-        sendDesktopNotification(
-          '【股价预警】' + name + '(' + code + ')',
-          '跌破目标低价！最新价: ¥' + price.toFixed(2) + ' (目标: <=¥' + alert.low_price.toFixed(2) + ')'
-        );
-      }
+      fireAlertNotification(code + '_low_price', cooldowns, now, intervalMs,
+        '【股价预警】' + name + '(' + code + ')',
+        '跌破目标低价！最新价: ¥' + fmtAlertPrice(price) + ' (目标: <=¥' + fmtAlertPrice(alert.low_price) + ')');
     }
 
     // 3. 涨幅高于目标
     if (alert.high_change > 0 && !isNaN(pct) && pct >= alert.high_change) {
-      const k = code + '_high_change';
-      if (claimAlertNotify(k, cooldowns, now, intervalMs)) {
-        store.setAlertCooldowns(cooldowns);
-        sendDesktopNotification(
-          '【大涨预警】' + name + '(' + code + ')',
-          '今日涨幅超标！当前涨幅: +' + pct.toFixed(2) + '% (目标: >=+' + alert.high_change.toFixed(2) + '%)'
-        );
-      }
+      fireAlertNotification(code + '_high_change', cooldowns, now, intervalMs,
+        '【大涨预警】' + name + '(' + code + ')',
+        '今日涨幅超标！当前涨幅: +' + pct.toFixed(2) + '% (目标: >=+' + alert.high_change.toFixed(2) + '%)');
     }
 
     // 4. 跌幅大于目标 (low_change 通常为负数)
     if (alert.low_change < 0 && !isNaN(pct) && pct <= alert.low_change) {
-      const k = code + '_low_change';
-      if (claimAlertNotify(k, cooldowns, now, intervalMs)) {
-        store.setAlertCooldowns(cooldowns);
-        sendDesktopNotification(
-          '【大跌预警】' + name + '(' + code + ')',
-          '今日跌幅超标！当前涨跌: ' + pct.toFixed(2) + '% (目标: <=' + alert.low_change.toFixed(2) + '%)'
-        );
-      }
+      fireAlertNotification(code + '_low_change', cooldowns, now, intervalMs,
+        '【大跌预警】' + name + '(' + code + ')',
+        '今日跌幅超标！当前涨跌: ' + pct.toFixed(2) + '% (目标: <=' + alert.low_change.toFixed(2) + '%)');
     }
   });
 }
@@ -576,7 +584,8 @@ const services = {
       if (list.some((x) => x.code === code)) return list;
       list.push({
         code,
-        secid: (item && item.secid) || ((/^[659]/.test(code) ? '1.' : '0.') + code),
+        // 920 开头是北交所新代码段（东财归 0 段），不能按 9 前缀误判成沪市
+        secid: (item && item.secid) || (/^920/.test(code) ? '0.' : (/^[659]/.test(code) ? '1.' : '0.')) + code,
         name: (item && item.name) || code,
         group: (item && item.group) || '默认'
       });
@@ -789,14 +798,14 @@ const services = {
   marketStatus: () => market.marketStatus(),
   host: {
     /** 拖动：phase=start|move|end，dx/dy 是相对按下点的位移（CSS 像素）；b = 按下瞬间同步读到的窗口 bounds（快速路径专用，主窗口无需再异步取） */
-    drag: (phase, dx, dy, b) => toHost({ t: 'drag', phase, dx: dx || 0, dy: dy || 0, b: b || null }),
+    drag: (phase, dx, dy, b, gesture) => toHost({ t: 'drag', phase, dx: dx || 0, dy: dy || 0, b: b || null, gesture }),
     /** 展开/收起球窗口里的右键菜单 */
     menu: (open) => toHost({ t: 'menu', open: !!open }),
     panel: (action) => toHost({ t: 'panel', action: action || 'toggle' }),
     ball: (action) => toHost({ t: 'ball', action: action || 'show' }),
     openUrl: (url) => {
-      openExternalUrl(url);
-      toHost({ t: 'open-url', url });
+      // 本窗口已成功唤起系统浏览器就不要再让主窗口开一次（面板双击自选行会双开标签页）
+      if (!openExternalUrl(url)) toHost({ t: 'open-url', url });
     },
     getDataFilePath: () => store.getDataFilePath(),
     openDataFile: () => {
@@ -897,6 +906,8 @@ let dragState = null;
 let pendingDragMove = null;   // 基准 bounds 尚未取到时，暂存最新一帧 move，取到后立即补应用
 let pendingDragEnd = null;    // 同理：起手还没就绪就松手了，end 先存着，起手就绪后补算终点
 let dragStartPending = false; // 异步取基准 bounds 进行中
+let dragGeneration = 0;
+let dragGesture = null;
 let lastBallBounds = null;
 let menuOpen = false;
 let menuPrevBounds = null;
@@ -966,6 +977,23 @@ function applyBallSizeToWindow(size) {
 function notify(body) { safe(() => Z.showNotification && Z.showNotification(body)); }
 function hideSelf() {
   safe(() => { const p = Z.hideMainWindow && Z.hideMainWindow(); if (p && p.catch) p.catch(() => {}); });
+}
+// showMainWindow 是异步 API。等宿主显示完成再跳转，子窗口失联时也可直接调用。
+async function activatePlugin(cmd) {
+  closePanel();
+  try {
+    if (typeof Z.showMainWindow === 'function') await Z.showMainWindow();
+  } catch (e) { log('显示主窗口失败', e); }
+  safe(() => { if (typeof Z.setExpendHeight === 'function') Z.setExpendHeight(600); });
+  try {
+    if (typeof Z.redirect === 'function') {
+      const result = await Z.redirect(cmd || 'stock');
+      if (result === false) return false;
+    }
+  } catch (e) { log('打开插件失败', e); return false; }
+  fireCtl({ t: 'cmd', cmd: 'switch-tab', tab: 'positions' });
+  fireCtl({ t: 'refresh' });
+  return true;
 }
 function endPlugin() {
   stopWatcher();
@@ -1038,17 +1066,54 @@ function greet(kind, win) {
 }
 function startWatcher() {
   if (watcher) return;
+  let lastKeepaliveAt = 0;   // 上次给球推通道保活消息的时刻
+  let lastRebuildAt = 0;     // 上次杀掉聋球重建的时刻（冷却防循环）
+  let lastOrphanDieAt = 0;   // 上次给无句柄孤儿球发 die 的时刻
   watcher = setInterval(() => {
     const ballAlive = alive(ballWin);
     const panelAlive = alive(panelWin);
     if (!ballAlive && ballWin) { ballWin = null; menuOpen = false; }
     if (!panelAlive && panelWin) { panelWin = null; }
-    // 通道中断自愈：球自报 needsRestart 并关闭后（dbStorage 是不经过坏通道的旁路），
-    // 1秒内清标志并按保存的位置重建 —— 新窗口新握手，拖动/双击通道彻底恢复
     try {
-      if (!ballWin) {
+      const now = Date.now();
+      if (ballWin) {
+        // ① 通道保活：球的上行（拖动/双击/心跳 ping）全靠 sendTo(hostId)，而 hostId
+        //    只能在收到主窗口消息时刷新。主窗口隐藏后若长期不发消息，球的 hostId 一旦
+        //    陈旧就再也发不出任何东西（死锁）。这里每 5s 主动推一条 —— 球收到主窗口的
+        //    任何消息都会刷新 hostId（ipcRenderer.on 入站自愈），通道无需重建即恢复。
+        if (now - lastKeepaliveAt >= 5000) {
+          lastKeepaliveAt = now;
+          toWindow(wcId(ballWin), { t: 'ping' });
+        }
+        // ② 聋球检测：球窗口活着但它的心跳停更（球每 5s 写一次，20s 没写 = 控制通道已死
+        //    或页面卡死，且自身的 45s 自愈没走通）→ 只能杀掉按保存位置重建。
+        //    心跳 id 必须与当前球句柄匹配才判定，避免已被 die 的旧球残写误伤新球。
         const hb = store.getHeartbeat();
-        if (hb && hb.needsRestart && (Date.now() - (hb.t || 0)) < 60000) {
+        const hbMatches = !!(hb && hb.id && hb.role === 'ball' && String(hb.id) === String(wcId(ballWin)));
+        if (hbMatches && (now - (hb.t || 0)) >= 20000 && now - lastRebuildAt >= 12000) {
+          lastRebuildAt = now;
+          closeBall();
+          setTimeout(() => { try { if (!alive(ballWin)) openBall(true); } catch (e) { /* ignore */ } }, 300);
+        }
+      } else {
+        const hb = store.getHeartbeat();
+        if (hb && hb.role === 'ball' && hb.id && !hb.closed && !hb.needsRestart &&
+            (now - (hb.t || 0)) < HEARTBEAT_FRESH_MS && now - lastOrphanDieAt >= 5000) {
+          // ③ 孤儿球认领：有球在正常写心跳，但本上下文没有它的句柄（主窗口重载/重建后，
+          //    开机补偿又错过了 15s 新鲜期）。旧球的上行对着死掉的主窗口 id 全部石沉大海，
+          //    拖动双击永远无响应 —— 让它自毁，随后按保存位置重建出新握手的新球。
+          lastOrphanDieAt = now;
+          toWindow(hb.id, { t: 'ctl', c: { t: 'die' } });
+          setTimeout(() => {
+            try {
+              // 600ms 内用户若手动关了球（心跳 closed），尊重用户意图不再拉起
+              const hb2 = store.getHeartbeat();
+              if (!ballWin && !(hb2 && hb2.closed)) openBall(true);
+            } catch (e) { /* ignore */ }
+          }, 600);
+        } else if (hb && hb.needsRestart && (now - (hb.t || 0)) < 60000) {
+          // ④ 兜底自愈：球自报 needsRestart 并关闭后（dbStorage 是不经过坏通道的旁路），
+          //    清标志并按保存的位置重建 —— 新窗口新握手，拖动/双击通道彻底恢复
           store.setHeartbeat({ id: null, role: 'ball', needsRestart: false });
           openBall(true);
         }
@@ -1115,6 +1180,10 @@ function createBall(size) {
 }
 
 function closeBall() {
+  dragGeneration += 1;
+  dragGesture = null;
+  dragState = pendingDragMove = pendingDragEnd = null;
+  dragStartPending = false;
   clearInterval(greetTimers.ball);
   const w = ballWin;
   ballWin = null;
@@ -1258,6 +1327,7 @@ onHostMsg((msg, senderId) => {
       return;
     case 'drag': {
       if (senderId !== wcId(ballWin)) return;
+      if (msg.phase !== 'start' && msg.gesture && msg.gesture !== dragGesture) return;
       if (menuOpen) expandMenu(false);
       const applyMove = (m) => {
         // 基准 bounds 还没取到（旧实现这里是直接丢弃 → 起手位移凭空消失、拖动发滞）。
@@ -1269,6 +1339,9 @@ onHostMsg((msg, senderId) => {
         });
       };
       const finishDrag = (m) => {
+        dragGeneration += 1;
+        dragGesture = null;
+        dragStartPending = false;
         pendingDragMove = null;
         const size = ballWindowSize(store.getSettings());
         const base = (dragState && dragState.b) || m.b || null;
@@ -1289,17 +1362,29 @@ onHostMsg((msg, senderId) => {
         });
       };
       if (msg.phase === 'start') {
+        const generation = ++dragGeneration;
+        const win = ballWin;
+        dragGesture = msg.gesture || null;
+        dragState = null;
         pendingDragMove = null;
         pendingDragEnd = null;
         const startDone = (b) => {
+          if (generation !== dragGeneration || win !== ballWin) return;
           dragStartPending = false;
           if (b) dragState = { b };
           if (msg.mid) toWindow(senderId, { t: 'ack', for: msg.mid, ok: !!dragState });
           if (pendingDragEnd) { const m = pendingDragEnd; pendingDragEnd = null; finishDrag(m); return; } // 快拖：还没就绪就松手了，终点现在补算
           if (pendingDragMove && dragState) { applyMove(pendingDragMove); pendingDragMove = null; }
         };
-        if (msg.b) startDone(msg.b);            // 快速路径：球端按下瞬间同步读到的 bounds
-        else { dragStartPending = true; boundsOf(ballWin).then(startDone); } // 常规路径：异步取，期间的 move/end 由 pending 兜住
+        if (msg.b) startDone(msg.b);
+        else {
+          const b = safe(() => ballWin.getBounds(), null);
+          if (b && typeof b.then === 'function') {
+            // 异步代理用已知位置立即起拖；迟到的旧快照不能覆盖下一次拖动。
+            if (lastBallBounds) { b.catch(() => {}); startDone(Object.assign({}, lastBallBounds)); }
+            else { dragStartPending = true; b.then(startDone).catch(() => startDone(null)); }
+          } else startDone(b || lastBallBounds);
+        }
         return;
       }
       if (msg.phase === 'move') { applyMove(msg); return; }
@@ -1335,39 +1420,19 @@ onHostMsg((msg, senderId) => {
     case 'open-url':
       openExternalUrl(msg.url);
       return;
+    case 'alert-fire': {
+      // 子窗口转发来的预警触发：主窗口统一认领冷却坑位后弹出（跨窗口绝不双弹）
+      if (!msg.k) return;
+      const cd = store.getAlertCooldowns();
+      if (claimAlertNotify(String(msg.k), cd, Date.now(), Number(msg.intervalMs) || 5 * 60 * 1000)) {
+        store.setAlertCooldowns(cd);
+        sendDesktopNotification(String(msg.title || '股价预警'), String(msg.body || ''));
+      }
+      return;
+    }
     case 'open-plugin':
     case 'open-main': {
-      const c = msg.cmd || 'stock';
-      // 彻底关闭独立小面板窗口，绝不显示它
-      closePanel();
-      safe(() => {
-        if (typeof Z.showMainWindow === 'function') Z.showMainWindow();
-        else if (typeof window !== 'undefined' && window.utools && typeof window.utools.showMainWindow === 'function') {
-          window.utools.showMainWindow();
-        }
-      });
-      safe(() => {
-        if (typeof Z.setExpendHeight === 'function') Z.setExpendHeight(600);
-        else if (typeof window !== 'undefined' && window.utools && typeof window.utools.setExpendHeight === 'function') {
-          window.utools.setExpendHeight(600);
-        }
-      });
-      safe(() => {
-        if (typeof Z.redirect === 'function') {
-          try { Z.redirect(c); } catch (e) { Z.redirect('stock'); }
-        } else if (typeof window !== 'undefined' && window.utools && typeof window.utools.redirect === 'function') {
-          try { window.utools.redirect(c); } catch (e) { window.utools.redirect('stock'); }
-        }
-      });
-      try {
-        const electron = require('electron');
-        if (electron && electron.remote && electron.remote.getCurrentWindow) {
-          const w = electron.remote.getCurrentWindow();
-          if (w) { w.show(); w.focus(); }
-        }
-      } catch (e) {}
-      fireCtl({ t: 'cmd', cmd: 'switch-tab', tab: 'positions' });
-      fireCtl({ t: 'refresh' });
+      activatePlugin(msg.cmd).then((ok) => toWindow(senderId, { t: 'ack', for: msg.mid, ok }));
       return;
     }
     case 'broadcast': {
@@ -1439,12 +1504,18 @@ if (IS_HOST) {
   // 主窗口句柄补偿：主窗口重载/重建后本上下文没有球句柄，拖动会因 wcId 守卫被静默丢弃
   //（表现就是「有时候拖不动」）—— 心跳显示球还活着就让旧球自毁，并按保存位置立即重建，
   // 新窗口 = 新握手 + 新句柄，拖动与双击通道一并恢复
+  startWatcher();   // 守望进程无条件启动：孤儿球可能在本上下文创建任何窗口之前就已存在
   try {
     const hb0 = store.getHeartbeat();
     if (!ballWin && hb0 && hb0.role === 'ball' && hb0.id && !hb0.needsRestart &&
         (Date.now() - (hb0.t || 0)) < HEARTBEAT_FRESH_MS) {
       toWindow(hb0.id, { t: 'ctl', c: { t: 'die' } });
-      setTimeout(() => { try { if (!ballWin) openBall(true); } catch (e) { /* ignore */ } }, 500);
+      setTimeout(() => {
+        try {
+          const hb2 = store.getHeartbeat();
+          if (!ballWin && !(hb2 && hb2.closed)) openBall(true);   // 期间用户手动关球则不再拉起
+        } catch (e) { /* ignore */ }
+      }, 500);
     }
   } catch (e) { /* ignore */ }
   // 主窗口页面上的按钮也能直接调用
@@ -1475,31 +1546,7 @@ if (IS_HOST) {
     store.patchSettings({ ballSize: val });
     applyBallSizeToWindow(val);
   };
-  services.host.openPlugin = (cmd) => {
-    const c = cmd || 'stock';
-    closePanel();
-    safe(() => {
-      if (typeof Z.showMainWindow === 'function') Z.showMainWindow();
-      else if (typeof window !== 'undefined' && window.utools && typeof window.utools.showMainWindow === 'function') {
-        window.utools.showMainWindow();
-      }
-    });
-    safe(() => {
-      if (typeof Z.setExpendHeight === 'function') Z.setExpendHeight(600);
-      else if (typeof window !== 'undefined' && window.utools && typeof window.utools.setExpendHeight === 'function') {
-        window.utools.setExpendHeight(600);
-      }
-    });
-    safe(() => {
-      if (typeof Z.redirect === 'function') {
-        try { Z.redirect(c); } catch (e) { safe(() => Z.redirect('stock-panel')); }
-      } else if (typeof window !== 'undefined' && window.utools && typeof window.utools.redirect === 'function') {
-        try { window.utools.redirect(c); } catch (e) { safe(() => window.utools.redirect('stock-panel')); }
-      }
-    });
-    fireCtl({ t: 'cmd', cmd: 'switch-tab', tab: 'positions' });
-    fireCtl({ t: 'refresh' });
-  };
+  services.host.openPlugin = activatePlugin;
   services.host.openMain = services.host.openPlugin;
   window.sbHost = services.host;
   try {
@@ -1517,7 +1564,7 @@ if (IS_HOST) {
     if (!msg) return;
     if (msg.t === 'ack') {
       const w = ackWaiters.get(msg.for);
-      if (w) { ackWaiters.delete(msg.for); w(true); }
+      if (w) { ackWaiters.delete(msg.for); w(msg.ok !== false); }
       return;
     }
     if (msg.t === 'ctl') {
@@ -1540,12 +1587,20 @@ if (IS_HOST) {
       let done = false;
       ackWaiters.set(mid, (ok) => { if (!done) { done = true; resolve(ok); } });
       toHost(Object.assign({}, msg, { mid }));
-      setTimeout(() => { if (!done) { done = true; ackWaiters.delete(mid); resolve(false); } }, ms || 700);
+      setTimeout(() => {
+        if (done) return;
+        done = true;
+        ackWaiters.delete(mid);
+        // 超时后调用方会自行兜底，握手恢复时不能再重放同一个打开请求。
+        const queued = pending.findIndex((m) => m.mid === mid);
+        if (queued >= 0) pending.splice(queued, 1);
+        resolve(false);
+      }, ms || 700);
     });
   }
 
-  /** 拖动起手：等主窗口真正拿到基准 bounds（ack）后才开始发 move；ack 前的位移在球端记账，到达即冲刷 */
-  services.host.dragStart = (b) => sendWithAck({ t: 'drag', phase: 'start', b: b || null }, 400);
+  /** 拖动起手确认；球端可立即发送位移。gesture 隔离连续的两次拖动。 */
+  services.host.dragStart = (b, gesture) => sendWithAck({ t: 'drag', phase: 'start', b: b || null, gesture }, 400);
 
   /** 主窗口（管家）失联时，球自己也能把面板开出来 */
   async function openPanelSmart() {
@@ -1574,9 +1629,11 @@ if (IS_HOST) {
     store.patchSettings({ ballOpacity: val });
     toHost({ t: 'set-opacity', opacity: val });
   };
-  services.host.openPlugin = (cmd) => {
+  services.host.openPlugin = async (cmd) => {
     const c = cmd || 'stock';
-    toHost({ t: 'open-plugin', cmd: c });
+    const ok = await sendWithAck({ t: 'open-plugin', cmd: c }, 700);
+    if (!ok) return activatePlugin(c);
+    return true;
   };
   services.host.openMain = services.host.openPlugin;
   /** 关闭自己这个窗口（先请管家，失联就直接关） */

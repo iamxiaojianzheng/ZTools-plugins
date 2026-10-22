@@ -1,6 +1,14 @@
 ﻿'use strict';
 const assert = require('assert');
 
+/* 与 index.js 的 txDate 同口径：按本地时区分组（UTC 切片会把本地凌晨的流水归到前一天） */
+function txDate(ts) {
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return String(ts || '').slice(0, 10);
+  var m = d.getMonth() + 1, day = d.getDate();
+  return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+}
+
 function computeStockDailyTimeline(list) {
   if (!list || !list.length) return [];
   var sorted = list.slice().sort(function (a, b) {
@@ -9,7 +17,7 @@ function computeStockDailyTimeline(list) {
 
   var dateMap = new Map();
   sorted.forEach(function (t) {
-    var d = String(t.created_at || '').slice(0, 10);
+    var d = txDate(t.created_at);
     if (!dateMap.has(d)) dateMap.set(d, []);
     dateMap.get(d).push(t);
   });
@@ -170,3 +178,12 @@ assert.strictEqual(td.dayTPnLGross, 27.00, '毛T盈亏应与同花顺一致 = 27
 assert.ok(Math.abs(td.dayTPnL - expectedRealNet) < 0.01, '净T盈亏应扣除对倒双边手续费');
 assert.strictEqual(td.dayTPnL > 0, true, '净T盈亏应为正');
 console.log('\n✓ 川环科技反T核算与同花顺口径一致测试通过！\n');
+
+console.log('== 4. 分组口径：按本地日期（UTC 切片会归错天） ==');
+const edgeIso = '2026-07-31T17:00:00.000Z'; // = 本地(UTC+8) 2026-08-01 01:00
+const edgeTl = computeStockDailyTimeline([
+  { stock_code: '600961', type: 1, price: 10, quantity: 100, total_price: 1000, created_at: edgeIso }
+]);
+assert.strictEqual(edgeTl[0].date, '2026-08-01', '按本地日期分组：本地凌晨的流水不能落到前一天，实际=' + edgeTl[0].date);
+assert.strictEqual(edgeTl[0].displayDate, '08-01', '柱子标签跟随本地日期');
+console.log('\n✓ 本地时区分组测试通过（凌晨流水不跨错天）！\n');

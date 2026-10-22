@@ -314,84 +314,104 @@ input { min-width: 0; padding: 10px 12px; border: 1px solid #cbd5e1; border-radi
 .image-preview-stage img { display: block; flex: none; height: auto; }
 .image-preview-stage .image-preview-content--fit { max-width: 100%; max-height: 100%; width: auto; height: auto; }
 
-@media (prefers-color-scheme: dark) {
-  :root { color: #fff; background: #111827; color-scheme: dark; }
-  .app-title { color: #fff; font-weight: 700; }
-  .workspace-view, .panel, .settings-dialog, .confirm-dialog, .save-conflict-dialog, .attachment-scan-dialog, .note-link-dialog, .table-dialog, .image-size-dialog, .trash-panel, .outline-panel { color: #fff; }
-  .panel, .topbar, .workspace-view > aside, .editor-panel, .create-menu-popover, .entry-menu-popover, .editor-more-popover, .image-context-menu, .confirm-dialog, .save-conflict-dialog, .attachment-scan-dialog, .note-link-dialog, .table-dialog, .image-size-dialog, .trash-panel, .search-results { border-color: #2b3a50; background: #182235; }
-  .settings-dialog > header, .settings-dialog > footer, .settings-group, .settings-action-row, .workspace-settings, .workspace-settings-row, .attachment-scan-list, .attachment-scan-list > div { border-color: #2b3a50; }
-  .muted, .search-results span, .search-results small, .search-state, .create-target, .pinned-notes h2, .note-find-count, .settings-group-title small, .settings-action-row small, .workspace-settings-header small, .workspace-settings-row small, .trash-retention-setting em, .confirm-dialog p, .workspace-migration-paths dt, .save-conflict-dialog p, .attachment-scan-dialog header p, .attachment-scan-list small, .attachment-scan-list > p, .note-link-list span, .note-link-list p, .table-size-fields span, .table-dialog > p, .trash-header span, .trash-item-info span, .trash-item-info small, .trash-empty span, .outline-empty { color: #d7e0ec; }
-  .confirm-dialog .workspace-migration-error { color: #fca5a5; }
-  .toolbar-icon-button, .outline-trigger, .editor-more-trigger, .entry-menu-trigger, .pinned-note-remove, .settings-dialog > header button, .save-conflict-dialog > header > button, .attachment-scan-dialog > header > button, .note-link-dialog > header button, .trash-close, .outline-header button, .note-icon { color: #f1f5f9; }
-  .folder-icon { color: #fbbf24; fill: rgb(251 191 36 / 18%); }
-  button:disabled { color: #718096; background-color: #202b3d; cursor: not-allowed; opacity: 1; box-shadow: inset 3px 0 #526176; }
-  input:disabled, select:disabled, textarea:disabled { color: #d7e0ec; cursor: not-allowed; opacity: 1; box-shadow: none; }
-  .trash-retention-setting--never .trash-retention-days { opacity: 1; }
-  .trash-retention-setting--never input[type="number"] { color: #d7e0ec; border-color: #64748b; background: #182235; opacity: 1; }
-  .button-secondary { color: #e5edf8; background: #334155; }
-  input, .topbar select, .editor-toolbar-actions select { border-color: #64748b; color: #fff; background-color: #182235; }
-  select option { color: #fff; background: #182235; }
-  .topbar select { color: #fff; border-color: #718096; background-color: #111827; }
-  .search-results strong { color: #fff; }
-  .search-results span, .search-results small, .search-state { color: #d7e0ec; }
-  .toolbar-icon-button:hover, .create-menu-trigger:hover, .outline-trigger:hover, .outline-trigger--active, .editor-more-trigger:hover, .editor-more-trigger[aria-expanded="true"], .editor-more-popover button:hover, .entry-menu-trigger:hover, .pinned-note-remove:hover, .settings-dialog > header button:hover, .save-conflict-dialog > header > button:hover, .attachment-scan-dialog > header > button:hover, .note-link-dialog > header button:hover, .trash-close:hover, .outline-header button:hover, .fullscreen-header .fullscreen-outline-button:hover { color: #fff; background: #3b4d68; }
-  .note-find-bar { border-color: #475569; background: #182235; }
-  .editor-loading { color: #d7e0ec; background: #182235; }
-  .editor-loading-spinner { border-color: #475569; border-top-color: #60a5fa; }
-  .markdown-editor.vditor--dark {
-    --border-color: #334155;
-    --second-color: rgb(174 189 208 / 42%);
-    --panel-background-color: #182235;
-    --toolbar-background-color: #151e2e;
-    --toolbar-icon-color: #d5deeb;
-    --toolbar-icon-hover-color: #fff;
-    --textarea-background-color: #182235;
-    --textarea-text-color: #edf4ff;
-    --heading-border-color: #475569;
-    --blockquote-color: #b8c5d6;
-  }
-  .markdown-editor.vditor--dark .vditor-reset { color: #edf4ff; }
-  .note-find-bar button:hover:not(:disabled) { background: #26354c; }
-  .code-block-tools { border-color: #475569; background: rgb(24 34 53 / 94%); }
-  .code-language-options { border-color: #475569; background: #182235; }
-  .code-language-options small, .code-language-options p { color: #94a3b8; }
-  .code-block-tools input, .code-block-tools button, .image-context-menu button { color: #e5edf8; background-color: transparent; }
-  .code-block-tools button:hover, .image-context-menu button:hover, .image-size-presets button:hover { background: #27364d; }
-  .image-size-presets > span { color: #d7e0ec; }
-  .image-size-presets button { color: #e5edf8; background: #334155; }
-  .image-context-menu .danger-menu-item { color: #fca5a5; }
-  .image-size-dialog p, .image-size-dialog small { color: #d7e0ec; }
-  ::highlight(note-find-current) { color: #111827; background: var(--find-highlight-color, #fbbf24); }
-  .settings-dialog { border-color: #2b3a50; background: #182235; }
-  .settings-switch { color: #d7e0ec; }
-  .settings-switch:hover { color: #fff; background: #27364d; }
-  .settings-switch i { background: #475569; }
-  .settings-switch--on { color: #bfdbfe; }
-  .settings-switch--on i { background: #3b82f6; }
-  .search-results button:hover, .search-results .search-result--selected { background: #27364d; }
-  .note-link-trigger { color: #e5edf8; background: #334155; }
-  .note-link-list button:hover { background: #27364d; }
-  .tree-row--selected, .tree-row--active { background: #27364d; }
-  .pinned-notes { border-color: #2b3a50; }
-  .pinned-note-row:hover, .pinned-note-row--active { background: #27364d; }
-  .pinned-note-remove:hover { color: #fecaca; background: #5b2632; }
-  .tree-row:hover { background: #223047; }
-  .tree-row--drop-target { background: #1e3a5f !important; }
-  .tree-row--drop-invalid { background: #451f2a !important; }
-  .root-drop-hint { color: #bfdbfe; background: #1e3a5f; }
-  .operation-message--error { border-color: #7f1d1d; color: #fecaca; background: #3b1d25; }
-  .operation-message--success { border-color: #166534; color: #bbf7d0; background: #163523; }
-  .create-menu-trigger { color: #e5edf8; background: #334155; }
-  .create-menu-popover button:hover { background: #27364d; }
-  .entry-menu-popover button:hover { background: #27364d; }
-  .note-message { background: rgb(24 34 53 / 90%); }
-  .create-target { background: #111827; }
-  .fullscreen-header { color: #e5edf8; background: #182235; box-shadow: 0 1px 0 #2b3a50; }
-  .fullscreen-header .fullscreen-outline-button { color: #e5edf8; background: #334155; }
-  .trash-header, .trash-item, .trash-footer { border-color: #2b3a50; }
-  .trash-delete-button { color: #fecaca; background: #3b1d25; }
-  .outline-panel { border-color: #2b3a50; background: rgb(24 34 53 / 97%); }
-  .outline-header { border-color: #2b3a50; }
-  .outline-trigger:hover, .outline-trigger--active { color: #fff; background: #3b4d68; }
-  .outline-list button:hover { background: #27364d; }
+:root[data-color-scheme="light"] { color-scheme: light; }
+:root[data-background-theme="white"] { background: #fff; }
+:where(:root[data-background-theme="white"]) .image-preview { background: #fff; }
+:where(:root[data-background-theme="white"]) .image-preview-toolbar { color: #172033; background: #f8fafc; }
+:where(:root[data-background-theme="white"]) .image-preview-toolbar button { color: #334155; background: #e2e8f0; }
+:where(:root[data-background-theme="white"]) .image-preview-toolbar button:hover { background: #cbd5e1; }
+:where(:root[data-background-theme="black"]) .image-preview { background: var(--theme-page); }
+:where(:root[data-background-theme="black"]) .image-preview-toolbar { background: var(--theme-surface); }
+:where(:root[data-background-theme="black"]) .image-preview-toolbar button { background: var(--theme-control); }
+:where(:root[data-background-theme="black"]) .image-preview-toolbar button:hover { background: var(--theme-hover-control); }
+:root[data-background-theme="black"] {
+  --theme-page: #111;
+  --theme-surface: #1a1a1a;
+  --theme-toolbar: #151515;
+  --theme-border: #333;
+  --theme-control: #383838;
+  --theme-selected: #303030;
+  --theme-hover: #262626;
+  --theme-hover-control: #444;
+  --theme-disabled: #242424;
 }
+.settings-dialog select { padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 8px; color: inherit; background: transparent; }
+:root[data-color-scheme="dark"] { color: #fff; background: var(--theme-page, #111827); color-scheme: dark; }
+:where(:root[data-color-scheme="dark"]) .app-title { color: #fff; font-weight: 700; }
+:where(:root[data-color-scheme="dark"]) .workspace-view, :where(:root[data-color-scheme="dark"]) .panel, :where(:root[data-color-scheme="dark"]) .settings-dialog, :where(:root[data-color-scheme="dark"]) .confirm-dialog, :where(:root[data-color-scheme="dark"]) .save-conflict-dialog, :where(:root[data-color-scheme="dark"]) .attachment-scan-dialog, :where(:root[data-color-scheme="dark"]) .note-link-dialog, :where(:root[data-color-scheme="dark"]) .table-dialog, :where(:root[data-color-scheme="dark"]) .image-size-dialog, :where(:root[data-color-scheme="dark"]) .trash-panel, :where(:root[data-color-scheme="dark"]) .outline-panel { color: #fff; }
+:where(:root[data-color-scheme="dark"]) .panel, :where(:root[data-color-scheme="dark"]) .topbar, :where(:root[data-color-scheme="dark"]) .workspace-view > aside, :where(:root[data-color-scheme="dark"]) .editor-panel, :where(:root[data-color-scheme="dark"]) .create-menu-popover, :where(:root[data-color-scheme="dark"]) .entry-menu-popover, :where(:root[data-color-scheme="dark"]) .editor-more-popover, :where(:root[data-color-scheme="dark"]) .image-context-menu, :where(:root[data-color-scheme="dark"]) .confirm-dialog, :where(:root[data-color-scheme="dark"]) .save-conflict-dialog, :where(:root[data-color-scheme="dark"]) .attachment-scan-dialog, :where(:root[data-color-scheme="dark"]) .note-link-dialog, :where(:root[data-color-scheme="dark"]) .table-dialog, :where(:root[data-color-scheme="dark"]) .image-size-dialog, :where(:root[data-color-scheme="dark"]) .trash-panel, :where(:root[data-color-scheme="dark"]) .search-results { border-color: var(--theme-border, #2b3a50); background: var(--theme-surface, #182235); }
+:where(:root[data-color-scheme="dark"]) .settings-dialog > header, :where(:root[data-color-scheme="dark"]) .settings-dialog > footer, :where(:root[data-color-scheme="dark"]) .settings-group, :where(:root[data-color-scheme="dark"]) .settings-action-row, :where(:root[data-color-scheme="dark"]) .workspace-settings, :where(:root[data-color-scheme="dark"]) .workspace-settings-row, :where(:root[data-color-scheme="dark"]) .attachment-scan-list, :where(:root[data-color-scheme="dark"]) .attachment-scan-list > div { border-color: var(--theme-border, #2b3a50); }
+:where(:root[data-color-scheme="dark"]) .muted, :where(:root[data-color-scheme="dark"]) .search-results span, :where(:root[data-color-scheme="dark"]) .search-results small, :where(:root[data-color-scheme="dark"]) .search-state, :where(:root[data-color-scheme="dark"]) .create-target, :where(:root[data-color-scheme="dark"]) .pinned-notes h2, :where(:root[data-color-scheme="dark"]) .note-find-count, :where(:root[data-color-scheme="dark"]) .settings-group-title small, :where(:root[data-color-scheme="dark"]) .settings-action-row small, :where(:root[data-color-scheme="dark"]) .workspace-settings-header small, :where(:root[data-color-scheme="dark"]) .workspace-settings-row small, :where(:root[data-color-scheme="dark"]) .trash-retention-setting em, :where(:root[data-color-scheme="dark"]) .confirm-dialog p, :where(:root[data-color-scheme="dark"]) .workspace-migration-paths dt, :where(:root[data-color-scheme="dark"]) .save-conflict-dialog p, :where(:root[data-color-scheme="dark"]) .attachment-scan-dialog header p, :where(:root[data-color-scheme="dark"]) .attachment-scan-list small, :where(:root[data-color-scheme="dark"]) .attachment-scan-list > p, :where(:root[data-color-scheme="dark"]) .note-link-list span, :where(:root[data-color-scheme="dark"]) .note-link-list p, :where(:root[data-color-scheme="dark"]) .table-size-fields span, :where(:root[data-color-scheme="dark"]) .table-dialog > p, :where(:root[data-color-scheme="dark"]) .trash-header span, :where(:root[data-color-scheme="dark"]) .trash-item-info span, :where(:root[data-color-scheme="dark"]) .trash-item-info small, :where(:root[data-color-scheme="dark"]) .trash-empty span, :where(:root[data-color-scheme="dark"]) .outline-empty { color: #d7e0ec; }
+:where(:root[data-color-scheme="dark"]) .confirm-dialog .workspace-migration-error { color: #fca5a5; }
+:where(:root[data-color-scheme="dark"]) .toolbar-icon-button, :where(:root[data-color-scheme="dark"]) .outline-trigger, :where(:root[data-color-scheme="dark"]) .editor-more-trigger, :where(:root[data-color-scheme="dark"]) .entry-menu-trigger, :where(:root[data-color-scheme="dark"]) .pinned-note-remove, :where(:root[data-color-scheme="dark"]) .settings-dialog > header button, :where(:root[data-color-scheme="dark"]) .save-conflict-dialog > header > button, :where(:root[data-color-scheme="dark"]) .attachment-scan-dialog > header > button, :where(:root[data-color-scheme="dark"]) .note-link-dialog > header button, :where(:root[data-color-scheme="dark"]) .trash-close, :where(:root[data-color-scheme="dark"]) .outline-header button, :where(:root[data-color-scheme="dark"]) .note-icon { color: #f1f5f9; }
+:where(:root[data-color-scheme="dark"]) .folder-icon { color: #fbbf24; fill: rgb(251 191 36 / 18%); }
+:where(:root[data-color-scheme="dark"]) button:disabled { color: #718096; background-color: var(--theme-disabled, #202b3d); cursor: not-allowed; opacity: 1; box-shadow: inset 3px 0 #526176; }
+:where(:root[data-color-scheme="dark"]) input:disabled, :where(:root[data-color-scheme="dark"]) select:disabled, :where(:root[data-color-scheme="dark"]) textarea:disabled { color: #d7e0ec; cursor: not-allowed; opacity: 1; box-shadow: none; }
+:where(:root[data-color-scheme="dark"]) .trash-retention-setting--never .trash-retention-days { opacity: 1; }
+:where(:root[data-color-scheme="dark"]) .trash-retention-setting--never input[type="number"] { color: #d7e0ec; border-color: #64748b; background: var(--theme-surface, #182235); opacity: 1; }
+:where(:root[data-color-scheme="dark"]) .button-secondary { color: #e5edf8; background: var(--theme-control, #334155); }
+:where(:root[data-color-scheme="dark"]) input, :where(:root[data-color-scheme="dark"]) .topbar select, :where(:root[data-color-scheme="dark"]) .editor-toolbar-actions select { border-color: #64748b; color: #fff; background-color: var(--theme-surface, #182235); }
+:where(:root[data-color-scheme="dark"]) select option { color: #fff; background: var(--theme-surface, #182235); }
+:where(:root[data-color-scheme="dark"]) .topbar select { color: #fff; border-color: #718096; background-color: var(--theme-page, #111827); }
+:where(:root[data-color-scheme="dark"]) .search-results strong { color: #fff; }
+:where(:root[data-color-scheme="dark"]) .search-results span, :where(:root[data-color-scheme="dark"]) .search-results small, :where(:root[data-color-scheme="dark"]) .search-state { color: #d7e0ec; }
+:where(:root[data-color-scheme="dark"]) .toolbar-icon-button:hover, :where(:root[data-color-scheme="dark"]) .create-menu-trigger:hover, :where(:root[data-color-scheme="dark"]) .outline-trigger:hover, :where(:root[data-color-scheme="dark"]) .outline-trigger--active, :where(:root[data-color-scheme="dark"]) .editor-more-trigger:hover, :where(:root[data-color-scheme="dark"]) .editor-more-trigger[aria-expanded="true"], :where(:root[data-color-scheme="dark"]) .editor-more-popover button:hover, :where(:root[data-color-scheme="dark"]) .entry-menu-trigger:hover, :where(:root[data-color-scheme="dark"]) .pinned-note-remove:hover, :where(:root[data-color-scheme="dark"]) .settings-dialog > header button:hover, :where(:root[data-color-scheme="dark"]) .save-conflict-dialog > header > button:hover, :where(:root[data-color-scheme="dark"]) .attachment-scan-dialog > header > button:hover, :where(:root[data-color-scheme="dark"]) .note-link-dialog > header button:hover, :where(:root[data-color-scheme="dark"]) .trash-close:hover, :where(:root[data-color-scheme="dark"]) .outline-header button:hover, :where(:root[data-color-scheme="dark"]) .fullscreen-header .fullscreen-outline-button:hover { color: #fff; background: var(--theme-hover-control, #3b4d68); }
+:where(:root[data-color-scheme="dark"]) .note-find-bar { border-color: #475569; background: var(--theme-surface, #182235); }
+:where(:root[data-color-scheme="dark"]) .editor-loading { color: #d7e0ec; background: var(--theme-surface, #182235); }
+:where(:root[data-color-scheme="dark"]) .editor-loading-spinner { border-color: #475569; border-top-color: #60a5fa; }
+:where(:root[data-color-scheme="dark"]) .markdown-editor.vditor--dark {
+  --border-color: var(--theme-control, #334155);
+  --second-color: rgb(174 189 208 / 42%);
+  --panel-background-color: var(--theme-surface, #182235);
+  --toolbar-background-color: var(--theme-toolbar, #151e2e);
+  --toolbar-icon-color: #d5deeb;
+  --toolbar-icon-hover-color: #fff;
+  --textarea-background-color: var(--theme-surface, #182235);
+  --textarea-text-color: #edf4ff;
+  --heading-border-color: #475569;
+  --blockquote-color: #b8c5d6;
+}
+:where(:root[data-color-scheme="dark"]) .markdown-editor.vditor--dark .vditor-reset { color: #edf4ff; }
+:where(:root[data-color-scheme="dark"]) .note-find-bar button:hover:not(:disabled) { background: var(--theme-selected, #26354c); }
+:where(:root[data-color-scheme="dark"]) .code-block-tools { border-color: #475569; background: var(--theme-surface, rgb(24 34 53 / 94%)); }
+:where(:root[data-color-scheme="dark"]) .code-language-options { border-color: #475569; background: var(--theme-surface, #182235); }
+:where(:root[data-color-scheme="dark"]) .code-language-options small, :where(:root[data-color-scheme="dark"]) .code-language-options p { color: #94a3b8; }
+:where(:root[data-color-scheme="dark"]) .code-block-tools input, :where(:root[data-color-scheme="dark"]) .code-block-tools button, :where(:root[data-color-scheme="dark"]) .image-context-menu button { color: #e5edf8; background-color: transparent; }
+:where(:root[data-color-scheme="dark"]) .code-block-tools button:hover, :where(:root[data-color-scheme="dark"]) .image-context-menu button:hover, :where(:root[data-color-scheme="dark"]) .image-size-presets button:hover { background: var(--theme-selected, #27364d); }
+:where(:root[data-color-scheme="dark"]) .image-size-presets > span { color: #d7e0ec; }
+:where(:root[data-color-scheme="dark"]) .image-size-presets button { color: #e5edf8; background: var(--theme-control, #334155); }
+:where(:root[data-color-scheme="dark"]) .image-context-menu .danger-menu-item { color: #fca5a5; }
+:where(:root[data-color-scheme="dark"]) .image-size-dialog p, :where(:root[data-color-scheme="dark"]) .image-size-dialog small { color: #d7e0ec; }
+:where(:root[data-color-scheme="dark"]) ::highlight(note-find-current) { color: var(--theme-page, #111827); background: var(--find-highlight-color, #fbbf24); }
+:where(:root[data-color-scheme="dark"]) .settings-dialog { border-color: var(--theme-border, #2b3a50); background: var(--theme-surface, #182235); }
+:where(:root[data-color-scheme="dark"]) .settings-switch { color: #d7e0ec; }
+:where(:root[data-color-scheme="dark"]) .settings-switch:hover { color: #fff; background: var(--theme-selected, #27364d); }
+:where(:root[data-color-scheme="dark"]) .settings-switch i { background: #475569; }
+:where(:root[data-color-scheme="dark"]) .settings-switch--on { color: #bfdbfe; }
+:where(:root[data-color-scheme="dark"]) .settings-switch--on i { background: #3b82f6; }
+:where(:root[data-color-scheme="dark"]) .search-results button:hover, :where(:root[data-color-scheme="dark"]) .search-results .search-result--selected { background: var(--theme-selected, #27364d); }
+:where(:root[data-color-scheme="dark"]) .note-link-trigger { color: #e5edf8; background: var(--theme-control, #334155); }
+:where(:root[data-color-scheme="dark"]) .note-link-list button:hover { background: var(--theme-selected, #27364d); }
+:where(:root[data-color-scheme="dark"]) .tree-row--selected, :where(:root[data-color-scheme="dark"]) .tree-row--active { background: var(--theme-selected, #27364d); }
+:where(:root[data-color-scheme="dark"]) .pinned-notes { border-color: var(--theme-border, #2b3a50); }
+:where(:root[data-color-scheme="dark"]) .pinned-note-row:hover, :where(:root[data-color-scheme="dark"]) .pinned-note-row--active { background: var(--theme-selected, #27364d); }
+:where(:root[data-color-scheme="dark"]) .pinned-note-remove:hover { color: #fecaca; background: #5b2632; }
+:where(:root[data-color-scheme="dark"]) .tree-row:hover { background: var(--theme-hover, #223047); }
+:where(:root[data-color-scheme="dark"]) .tree-row--drop-target { background: #1e3a5f !important; }
+:where(:root[data-color-scheme="dark"]) .tree-row--drop-invalid { background: #451f2a !important; }
+:where(:root[data-color-scheme="dark"]) .root-drop-hint { color: #bfdbfe; background: #1e3a5f; }
+:where(:root[data-color-scheme="dark"]) .operation-message--error { border-color: #7f1d1d; color: #fecaca; background: #3b1d25; }
+:where(:root[data-color-scheme="dark"]) .operation-message--success { border-color: #166534; color: #bbf7d0; background: #163523; }
+:where(:root[data-color-scheme="dark"]) .create-menu-trigger { color: #e5edf8; background: var(--theme-control, #334155); }
+:where(:root[data-color-scheme="dark"]) .create-menu-popover button:hover { background: var(--theme-selected, #27364d); }
+:where(:root[data-color-scheme="dark"]) .entry-menu-popover button:hover { background: var(--theme-selected, #27364d); }
+:where(:root[data-color-scheme="dark"]) .note-message { background: var(--theme-surface, rgb(24 34 53 / 90%)); }
+:where(:root[data-color-scheme="dark"]) .create-target { background: var(--theme-page, #111827); }
+:where(:root[data-color-scheme="dark"]) .fullscreen-header { color: #e5edf8; background: var(--theme-surface, #182235); box-shadow: 0 1px 0 var(--theme-border, #2b3a50); }
+:where(:root[data-color-scheme="dark"]) .fullscreen-header .fullscreen-outline-button { color: #e5edf8; background: var(--theme-control, #334155); }
+:where(:root[data-color-scheme="dark"]) .trash-header, :where(:root[data-color-scheme="dark"]) .trash-item, :where(:root[data-color-scheme="dark"]) .trash-footer { border-color: var(--theme-border, #2b3a50); }
+:where(:root[data-color-scheme="dark"]) .trash-delete-button { color: #fecaca; background: #3b1d25; }
+:where(:root[data-color-scheme="dark"]) .outline-panel { border-color: var(--theme-border, #2b3a50); background: var(--theme-surface, rgb(24 34 53 / 97%)); }
+:where(:root[data-color-scheme="dark"]) .outline-header { border-color: var(--theme-border, #2b3a50); }
+:where(:root[data-color-scheme="dark"]) .outline-trigger:hover, :where(:root[data-color-scheme="dark"]) .outline-trigger--active { color: #fff; background: var(--theme-hover-control, #3b4d68); }
+:where(:root[data-color-scheme="dark"]) .outline-list button:hover { background: var(--theme-selected, #27364d); }

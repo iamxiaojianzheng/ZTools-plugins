@@ -8,6 +8,7 @@
 
 ## 功能
 
+- 支持 GitHub Container Registry（GHCR）官方源 `https://ghcr.io`，可匿名下载公开镜像，也可使用 GitHub 用户名和个人访问令牌下载私有镜像
 - 支持 Docker Hub、1ms、轩辕镜像，以及 DaoCloud 的 Docker Hub、Kubernetes、NVIDIA、Google、GitHub、Quay 等内置镜像源地址
 - 设置页通过下拉框一次编辑一个镜像源，支持新增和删除自定义 Registry
 - 支持为每个镜像源单独配置用户名和密码
@@ -41,9 +42,19 @@ harbor.example.com/team/service:release
 docker load -i "nginx_latest_linux_amd64.tar"
 ```
 
+## 下载 GitHub 镜像
+
+在首页将“镜像地址”切换为“GitHub GHCR 官方”，输入完整镜像引用，例如 `ghcr.io/stefanprodan/podinfo:6.7.1`，然后解析并下载。通过 DaoCloud 加速时可选择“DaoCloud · GitHub”，镜像名称仍填写完整的 `ghcr.io/...` 引用。所选镜像地址决定实际请求的仓库，输入 GHCR 引用时应选择对应的 GitHub 镜像源。
+
+公开镜像无需填写用户名或密码。私有镜像需要在设置页展开该镜像源的“仓库认证”，填写 GitHub 用户名，并将具有 `read:packages` 权限的个人访问令牌（经典）填入密码字段；组织启用了 SSO 时，令牌还需获得相应授权。认证要求见 [GitHub 官方文档](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
+
+访问 GHCR 需要网络代理时，在设置中填写代理地址，并单独启用“GitHub GHCR 官方”的代理开关。导出的 tar 保留完整标签，例如 `ghcr.io/stefanprodan/podinfo:6.7.1`。
+
+升级会自动补充 GHCR 官方源，并保留已有镜像源、认证、代理和下载目录配置。
+
 ## 设置说明
 
-- **镜像源**：通过下拉框切换当前编辑项，每项包含名称、Registry 地址、独立代理开关和可折叠的仓库认证；内置 10 个常用地址，也可增加自定义镜像源。
+- **镜像源**：通过下拉框切换当前编辑项，每项包含名称、Registry 地址、独立代理开关和可折叠的仓库认证；内置 11 个常用地址，也可增加自定义镜像源。
 - **代理设置**：协议支持 HTTP 和 HTTPS，可配置代理地址、用户名和密码；只有在“镜像源管理”中启用代理的镜像源才会使用这些配置。
 - **下载路径**：支持手动填写或通过系统资源管理器选择目录，默认是系统“下载”目录下的 `did-tool`。
 
@@ -105,7 +116,8 @@ src/
 ├── env.d.ts                   # preload 接口类型
 └── main.css                   # 全局主题
 tests/
-└── docker-service.test.cjs    # 下载服务测试
+├── docker-service.test.cjs    # 下载服务测试
+└── settings.test.cjs          # 设置与迁移测试
 ```
 
 核心下载流程参考了开源项目 [topcss/docker-pull-tar](https://github.com/topcss/docker-pull-tar) 的 Registry 鉴权、多架构选择及 Docker save 格式实现，并改写为适用于 ZTools preload 的 Node.js 流式任务模型。

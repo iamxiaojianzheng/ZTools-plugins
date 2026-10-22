@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <title>闪启 FlashLaunch</title>
+    <link rel="icon" href="./logo.png" />
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <header class="topbar">
+        <div class="brand" id="brand" title="闪启 FlashLaunch">
+          <img src="./logo.png" alt="闪启" class="brand-logo" />
+          <span class="brand-name">闪启</span>
+          <span class="brand-badge">FlashLaunch</span>
+        </div>
+
+        <nav class="tabs" id="tabs" role="tablist">
+          <button class="tab is-active" data-tab="apps" role="tab">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />
+            </svg>
+            应用<span class="tab-count" id="count-apps">0</span>
+          </button>
+          <button class="tab" data-tab="webs" role="tab">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 9h-3.05a15.6 15.6 0 0 0-1.1-5.32A8.02 8.02 0 0 1 18.9 11zM12 4.04c.83 1.2 1.53 3.32 1.7 6.96h-3.4c.17-3.64.87-5.76 1.7-6.96zM5.1 11a8.02 8.02 0 0 1 4.15-5.32A15.6 15.6 0 0 0 8.15 11H5.1zm0 2h3.05c.15 2.04.53 3.83 1.1 5.32A8.02 8.02 0 0 1 5.1 13zm6.9 6.96c-.83-1.2-1.53-3.32-1.7-6.96h3.4c-.17 3.64-.87 5.76-1.7 6.96zM15.25 18.32c.57-1.49.95-3.28 1.1-5.32h3.05a8.02 8.02 0 0 1-4.15 5.32z"
+              />
+            </svg>
+            网址<span class="tab-count" id="count-webs">0</span>
+          </button>
+        </nav>
+
+        <div class="search" id="search-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="search-icon">
+            <path
+              d="M10.5 3a7.5 7.5 0 0 1 5.96 12.06l4.24 4.24-1.4 1.4-4.25-4.23A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"
+            />
+          </svg>
+          <input id="search" type="text" autocomplete="off" spellcheck="false" placeholder="搜索名称、别名或路径…" />
+          <kbd class="search-kbd">Ctrl F</kbd>
+          <button class="search-clear" id="search-clear" title="清空" aria-label="清空搜索">×</button>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="btn btn-primary" id="add-btn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" /></svg>
+            添加
+          </button>
+          <button class="btn-icon" id="settings-btn" title="设置" aria-label="设置">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 5.4c.04-.45.06-.9.06-1.4 0-.49-.02-.95-.07-1.4l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.6 7.6 0 0 0-1.21-.7l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.43.2-.84.44-1.21.7l-2.4-.96a.5.5 0 0 0-.59.22L1.3 8.38a.5.5 0 0 0 .12.64L3.45 10.6c-.04.45-.07.91-.07 1.4s.03.95.07 1.4l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.33.6.22l2.39-.96c.37.27.78.5 1.21.7l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.43-.2.84-.43 1.21-.7l2.4.96c.22.09.47 0 .59-.22l1.92-3.32a.5.5 0 0 0-.12-.64L20.94 13.4z"
+              />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="content">
+        <div class="grid" id="grid" role="list"></div>
+
+        <div class="empty" id="empty" hidden>
+          <div class="empty-art">
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <defs>
+                <linearGradient id="eg" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#6366f1" />
+                  <stop offset="1" stop-color="#06b6d4" />
+                </linearGradient>
+              </defs>
+              <rect x="18" y="26" width="84" height="62" rx="14" fill="url(#eg)" opacity=".14" />
+              <rect x="26" y="34" width="68" height="46" rx="10" fill="none" stroke="url(#eg)" stroke-width="2" />
+              <path d="M60 42 46 64h11l-3 16 17-24H59z" fill="url(#eg)" />
+            </svg>
+          </div>
+          <h3 id="empty-title">还没有应用</h3>
+          <p id="empty-desc">把桌面快捷方式拖进来，或点击右上角「添加」。</p>
+          <div class="empty-actions" id="empty-actions"></div>
+        </div>
+      </main>
+
+      <footer class="statusbar">
+        <span class="status-left">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-text">本地数据 · 本地存储</span>
+        </span>
+        <span class="status-hint">
+          <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 选择 · <kbd>Enter</kbd> 打开 · <kbd>右键</kbd> 更多 · 支持拖入文件/链接
+        </span>
+      </footer>
+    </div>
+
+    <div class="drop-overlay" id="drop-overlay" hidden>
+      <div class="drop-card">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M11 3h2v10.17l3.59-3.58L18 11l-6 6-6-6 1.41-1.41L11 13.17zM5 19h14v2H5z" />
+        </svg>
+        <strong>松手即可添加</strong>
+        <span>文件、文件夹、快捷方式或网址</span>
+      </div>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="menu-root"></div>
+    <div class="toast-root" id="toast-root"></div>
+
+    <script src="./assets/app.js"></script>
+  </body>
+</html>

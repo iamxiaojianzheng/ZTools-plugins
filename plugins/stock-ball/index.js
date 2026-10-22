@@ -10,9 +10,6 @@
   var watchlist = [];
   var quoteMap = {};
   var idxList = [];
-  var expanded = null;
-  var trendCache = {};
-  var detailCache = {};
   var lastUpdate = 0;
   var failCount = 0;
   var refreshTimer = null;
@@ -21,7 +18,7 @@
   var txSearchTimer = null;
   var txType = 1; // 1: 买入, 2: 卖出
   var currentDtCode = null;
-  // K线弹窗状态（当日K线 klt=5 / 历史K线 klt=101），数据按 代码|klt 缓存
+  // K线弹窗状态（当日分时 klt=5 / 历史K线 klt=101），数据按 代码|klt 缓存
   var kChartState = { code: null, name: '', klt: 5 };
   var klineCache = {};
   var kChartInst = null;
@@ -31,6 +28,19 @@
   var closedData = [];
 
   /* ---------------- 基础工具函数 ---------------- */
+  /* 流水时间口径：created_at 存的是 UTC ISO，展示/分组必须先转本地时区，
+     直接切字符串会显示成 UTC（比实际早8小时），按日分组还会把本地凌晨的流水归到前一天 */
+  function txDate(ts) {
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return String(ts || '').slice(0, 10);
+    var m = d.getMonth() + 1, day = d.getDate();
+    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+  function txDateTime(ts) {
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return String(ts || '').replace('T', ' ').slice(0, 16);
+    return txDate(ts) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function timeStr(ts) {
     var d = new Date(ts);
@@ -97,6 +107,9 @@
   function refreshImpl(force) {
     // force === true（手动刷新按钮）：连非交易时段也强制重拉，透传给 preload 的 force 通道
     var fOpts = (force === true) ? { force: true } : undefined;
+    // 四条子链路都在内部兜底（reject 被吃掉变 null/[]），外层 Promise.all 永不 reject；
+    // 失败必须靠 anyFail 标记传出来，否则 failCount 恒 0，「行情获取失败」提示与退避重试永不生效
+    var anyFail = false;
     // 1. 持仓实时行情（只请求持仓个股，拿到立刻更新持仓看板和悬浮球）
     var posP = safeCall(function () { return S.positions ? S.positions.get(fOpts) : Promise.resolve(null); })
       .then(function (summary) {
@@ -105,7 +118,7 @@
           updateBallBtnState();
         }
         return summary;
-      }).catch(function () { return null; });
+      }).catch(function () { anyFail = true; return null; });
 
     // 2. 自选股行情（拿到立刻更新自选股列表）
     var qP = safeCall(function () { return S.quotes ? S.quotes(fOpts) : Promise.resolve([]); })
@@ -116,7 +129,7 @@
           renderWatchlist();
         }
         return list;
-      }).catch(function () { return []; });
+      }).catch(function () { anyFail = true; return []; });
 
     // 3. 大盘四大指数（拿到立刻更新顶部指数横幅）
     var ixP = safeCall(function () { return S.indexes ? S.indexes(fOpts) : Promise.resolve([]); })
@@ -126,7 +139,7 @@
           renderIndexes();
         }
         return indexes;
-      }).catch(function () { return []; });
+      }).catch(function () { anyFail = true; return []; });
 
     // 已清仓列表：纯本地计算（不发网络请求），跟着每轮刷新一起更新
     var clP = Promise.resolve().then(function () {
@@ -134,17 +147,21 @@
     }).then(function (list) {
       renderClosed(list || []);
       return list;
-    }).catch(function () { return []; });
+    }).catch(function () { anyFail = true; return []; });
 
     return Promise.all([posP, qP, ixP, clP]).then(function () {
-      failCount = 0;
-      lastUpdate = Date.now();
-      renderStatus();
-    }).catch(function (err) {
-      failCount += 1;
+      if (anyFail) {
+        failCount += 1;
+      } else {
+        failCount = 0;
+        lastUpdate = Date.now();
+      }
       renderStatus();
       // 隐藏期间不再后台重试（否则失败时会在看不见的地方永续轮询），回前台由 visibilitychange 补
-      if (!document.hidden) setTimeout(refresh, Math.min(30000, 4000 * failCount));
+      if (anyFail && !document.hidden) setTimeout(refresh, Math.min(30000, 4000 * failCount));
+    }).catch(function () {
+      failCount += 1;
+      renderStatus();
     });
   }
 
@@ -164,24 +181,6 @@
     // 刚刷新过就不再打一轮：快速切换标签页不产生多余请求（1.5s 内视为仍新鲜）
     if (Date.now() - lastUpdate >= 1500) refresh().catch(function () {}).then(loopRefresh);
   });
-
-  function loadTrend(code, force) {
-    var hit = trendCache[code];
-    if (!force && hit && Date.now() - hit.at < 20000) return Promise.resolve(hit.data);
-    return rethrow(safeCall(function () { return S.trend(code); })).then(function (data) {
-      trendCache[code] = { at: Date.now(), data: data };
-      return data;
-    });
-  }
-
-  function loadDetail(code, force) {
-    var hit = detailCache[code];
-    if (!force && hit && Date.now() - hit.at < 20000) return Promise.resolve(hit.data);
-    return rethrow(safeCall(function () { return S.detail(code); })).then(function (data) {
-      detailCache[code] = { at: Date.now(), data: data };
-      return data;
-    });
-  }
 
   /* ---------------- 状态与四大指数 ---------------- */
   function renderStatus() {
@@ -663,12 +662,12 @@
       var q = quoteMap[w.code] || {};
       var pct = q.pct === undefined ? null : q.pct;
       var price = q.price === undefined ? null : q.price;
-      var chg = q.chg !== undefined && q.chg !== null ? q.chg : (price !== null && q.prevClose ? price - q.prevClose : null);
+      // 行情字段叫 change（不是 chg），缺失时用现价 − 昨收兜底
+      var chg = q.change !== undefined && q.change !== null ? q.change : (price !== null && q.prevClose ? price - q.prevClose : null);
       var name = w.name || q.name || w.code;
       var grp = w.group || '默认';
-      var isOpen = expanded === w.code;
       var hasAlert = !!(alertsMap[w.code] && alertsMap[w.code].enabled !== false);
-      var row = '<div class="stock' + (isOpen ? ' open' : '') + '" data-code="' + esc(w.code) + '">' +
+      var row = '<div class="stock" data-code="' + esc(w.code) + '">' +
         '<div class="line">' +
           '<div class="nm">' +
             esc(name) +
@@ -689,17 +688,11 @@
           '</div>' +
         '</div>';
 
-      if (isOpen) {
-        row += '<div class="detail" data-detail="' + esc(w.code) + '">' +
-          '<canvas></canvas>' +
-          '<div class="grid" data-stats></div>' +
-          '</div>';
-      }
       row += '</div>';
       return row;
     }).join('');
 
-    // 列表内容没变就只刷新展开的详情（不重建 DOM，保住 canvas 与事件监听）
+    // 内容没变就不重建 DOM（保住事件监听）
     var rebuilt = setHtml(box, watchlistHtml);
     if (rebuilt) Array.prototype.forEach.call(box.querySelectorAll('.stock'), function (el) {
       var code = el.getAttribute('data-code');
@@ -736,7 +729,6 @@
             var sName = (item && item.name) || q.name || code;
             showConfirm('确定将「' + sName + ' (' + code + ')」从自选股中删除吗？（它的预警提醒也会一并取消）', function () {
               if (S.watchlist && S.watchlist.remove) S.watchlist.remove(code);   // 同时会取消它的预警提醒
-              if (expanded === code) expanded = null;
               reloadAlerts();
               renderGroupTabs();
               renderWatchlist();
@@ -746,9 +738,6 @@
           }
           return;
         }
-        expanded = (expanded === code) ? null : code;
-        renderWatchlist();
-        if (expanded) hydrateDetail(code);
       });
 
       el.querySelector('.line').addEventListener('dblclick', function () {
@@ -756,100 +745,6 @@
         if (S.host && S.host.openUrl) S.host.openUrl('https://quote.eastmoney.com/' + mkt + code + '.html');
       });
     });
-
-    if (expanded) hydrateDetail(expanded);
-  }
-
-  function hydrateDetail(code) {
-    var el = document.querySelector('.detail[data-detail="' + code + '"]');
-    if (!el) return;
-    var canvas = el.querySelector('canvas');
-    var stats = el.querySelector('[data-stats]');
-    var q = quoteMap[code] || {};
-    loadTrend(code).then(function (data) {
-      drawTrend(canvas, data, q);
-      if (stats && !stats.getAttribute('data-filled')) {
-        stats.setAttribute('data-filled', '1');
-        renderStats(stats, q, data);
-      }
-    }).catch(function () {
-      var ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#93a4bd';
-      ctx.font = '12px Microsoft YaHei';
-      ctx.textAlign = 'center';
-      ctx.fillText('分时数据获取失败，稍后自动重试', canvas.clientWidth / 2, 54);
-    });
-    loadDetail(code).then(function (d) {
-      if (stats) { stats.removeAttribute('data-filled'); renderStats(stats, Object.assign({}, q, d), trendCache[code] && trendCache[code].data); }
-    }).catch(function () {});
-  }
-
-  function renderStats(box, q, trend) {
-    var prev = (trend && trend.prevClose) || q.prevClose;
-    var items = [
-      ['今开', fmtPrice(q.open)], ['最高', fmtPrice(q.high)], ['最低', fmtPrice(q.low)],
-      ['昨收', fmtPrice(prev)], ['成交量', q.volume === null || q.volume === undefined ? '--' : fmtBig(q.volume * 100) + '股'],
-      ['成交额', fmtBig(q.amount)], ['换手率', q.turnover === null || q.turnover === undefined ? '--' : q.turnover + '%'],
-      ['量比', q.volumeRatio === null || q.volumeRatio === undefined ? '--' : q.volumeRatio],
-      ['市盈率', q.pe === null || q.pe === undefined ? '--' : q.pe]
-    ];
-    box.innerHTML = items.map(function (it) {
-      return '<div><span>' + it[0] + '</span> <b>' + esc(it[1]) + '</b></div>';
-    }).join('');
-  }
-
-  function drawTrend(canvas, data, q) {
-    if (!canvas) return;
-    var dpr = window.devicePixelRatio || 1;
-    var w = canvas.clientWidth || 380;
-    var h = canvas.clientHeight || 108;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    var ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-
-    var items = (data && data.items) || [];
-    if (items.length < 2) {
-      ctx.fillStyle = '#93a4bd';
-      ctx.font = '12px Microsoft YaHei';
-      ctx.textAlign = 'center';
-      ctx.fillText(items.length ? '暂无足够分时数据' : '暂无分时数据（可能未开盘）', w / 2, h / 2);
-      return;
-    }
-    var prev = (data && data.prevClose) || (q && q.prevClose) || items[0].price;
-    var prices = items.map(function (x) { return x.price; });
-    var min = Math.min.apply(null, prices.concat([prev]));
-    var max = Math.max.apply(null, prices.concat([prev]));
-    if (max - min < 1e-6) { max += 0.01; min -= 0.01; }
-    var padY = (max - min) * 0.12;
-    min -= padY; max += padY;
-    var y = function (v) { return h - ((v - min) / (max - min)) * h; };
-    var x = function (i) { return (i / (items.length - 1)) * w; };
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    var prevY = Math.round(y(prev)) + 0.5;
-    ctx.moveTo(0, prevY); ctx.lineTo(w, prevY);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.strokeStyle = '#4facfe';
-    ctx.lineWidth = 1.5;
-    items.forEach(function (it, i) {
-      var px = x(i), py = y(it.price);
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    });
-    ctx.stroke();
-
-    ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
-    var grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, 'rgba(79,172,254,0.3)');
-    grad.addColorStop(1, 'rgba(79,172,254,0.0)');
-    ctx.fillStyle = grad;
-    ctx.fill();
   }
 
   /* ---------------- Tab 切换 ---------------- */
@@ -973,7 +868,7 @@
 
     codeInput.value = o.code || '';
     nameInput.value = o.name || '';
-    priceInput.value = (o.price !== undefined && o.price !== null && o.price !== '') ? Number(o.price).toFixed(2) : '';
+    priceInput.value = (o.price !== undefined && o.price !== null && o.price !== '') ? fmtPrice(o.price) : '';
     if (qtyInput) {
       qtyInput.step = '100';
       qtyInput.min = '100';
@@ -1192,7 +1087,7 @@
 
     var dateMap = new Map();
     sorted.forEach(function (t) {
-      var d = String(t.created_at || '').slice(0, 10);
+      var d = txDate(t.created_at);
       if (!dateMap.has(d)) dateMap.set(d, []);
       dateMap.get(d).push(t);
     });
@@ -1734,18 +1629,27 @@
       else { totalSellQty += q; totalSellAmt += amt; }
     });
     var remainQty = totalBuyQty - totalSellQty;
+    var timeline = computeStockDailyTimeline(list);
+    // 累计T盈亏：所有「当日买卖对倒」的做T盈亏加总（与柱状图悬浮里的当日T盈亏同口径，纯减仓不算T）
+    var totalTPnL = 0;
+    var tCount = 0;
+    timeline.forEach(function (d) {
+      totalTPnL += d.dayTPnL;
+      if (d.hasT) tCount += 1;
+    });
+    totalTPnL = Number(totalTPnL.toFixed(2));
     $('dtSummary').innerHTML = '<span>买入总计: ' + totalBuyQty.toLocaleString() + '股 / ¥' + totalBuyAmt.toFixed(2) + '</span>' +
       '<span>卖出总计: ' + totalSellQty.toLocaleString() + '股 / ¥' + totalSellAmt.toFixed(2) + '</span>' +
-      '<span style="font-weight:700;color:var(--text);">当前持仓: ' + remainQty.toLocaleString() + '股</span>';
-
-    var timeline = computeStockDailyTimeline(list);
+      '<span style="font-weight:700;color:var(--text);">当前持仓: ' + remainQty.toLocaleString() + '股</span>' +
+      '<span>累计T盈亏: <b class="' + (totalTPnL > 0 ? 'up' : (totalTPnL < 0 ? 'down' : 'flat')) + '" style="font-weight:700;">' + (totalTPnL > 0 ? '+' : '') + totalTPnL.toFixed(2) + '元</b>' +
+      (tCount > 0 ? ' <span style="font-size:11px;color:var(--muted);">（T ' + tCount + ' 次）</span>' : '') + '</span>';
 
     function renderListItems(filteredDate) {
       var dtBox = $('dtList');
       var displayList = list.slice();
       if (filteredDate) {
         displayList = displayList.filter(function (t) {
-          return String(t.created_at || '').slice(0, 10) === filteredDate;
+          return txDate(t.created_at) === filteredDate;
         });
       }
 
@@ -1757,7 +1661,7 @@
         var sorted = displayList.sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
         dtBox.innerHTML = sorted.map(function (t) {
           var isBuy = Number(t.type) === 1;
-          var dateStr = (t.created_at || '').replace('T', ' ').slice(0, 16);
+          var dateStr = txDateTime(t.created_at);
           var fees = (Number(t.commission || 0) + Number(t.transfer_fee || 0) + Number(t.stamp_tax || 0));
           var feeTag = fees > 0 ? (' <span style="font-size:11px;color:#f6ad55;">(手续费 ¥' + fees.toFixed(2) + ')</span>') : '';
           return '<div class="dtItem">' +
@@ -1767,7 +1671,7 @@
               feeTag +
             '</div>' +
             '<div style="font-variant-numeric:tabular-nums;font-size:13px;">' +
-              '¥' + Number(t.price).toFixed(2) + ' × ' + t.quantity + '股 = <b>¥' + Number(t.total_price || (t.price * t.quantity)).toFixed(2) + '</b>' +
+              '¥' + fmtPrice(t.price) + ' × ' + t.quantity + '股 = <b>¥' + Number(t.total_price || (t.price * t.quantity)).toFixed(2) + '</b>' +
             '</div>' +
             '<button class="dtDel" data-id="' + t.id + '" title="删除此记录">删除</button>' +
           '</div>';
@@ -1842,7 +1746,7 @@
           $('txName').value = r.name;
           $('txSuggest').hidden = true;
           safeCall(function () { return S.detail ? S.detail(r.code) : Promise.resolve(null); }).then(function (d) {
-            if (d && d.price) { $('txPrice').value = Number(d.price).toFixed(2); calcTxTotal(); }
+            if (d && d.price) { $('txPrice').value = fmtPrice(d.price); calcTxTotal(); }
           }).catch(function () {});
         });
       }).catch(function () {});
@@ -1939,13 +1843,7 @@
     if ($('setStampTax')) $('setStampTax').value = '5';
   }
 
-  /* ---------------- K线弹窗（当日K线 / 历史K线） ---------------- */
-  function localDayStr(d) {
-    var x = d || new Date();
-    var m = x.getMonth() + 1;
-    var day = x.getDate();
-    return x.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
-  }
+  /* ---------------- K线弹窗（当日分时 / 历史K线） ---------------- */
 
   /* echarts 按需懒加载（插件根目录的 echarts.min.js），避免拖慢插件启动 */
   function flushEchartsWait() {
@@ -1968,23 +1866,23 @@
     } catch (e) { echartsLoad = 3; flushEchartsWait(); }
   }
 
-  /* K线数据：按 代码|klt 缓存（当日60秒、历史5分钟），点开才拉，不进非交易时段闸门 */
+  /* 分时/K线数据：按 代码|klt 缓存（分时60秒、历史5分钟），点开才拉，不进非交易时段闸门。
+     klt=5 → 当日分时（market.trend：价格/均价/昨收）；klt=101 → 历史日K（market.kline） */
   function loadKline(code, klt) {
     var key = code + '|' + klt;
     var hit = klineCache[key];
     var ttl = (klt === 101) ? 300000 : 60000;
     if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.data);
     return rethrow(safeCall(function () {
+      if (klt === 5) return S.trend ? S.trend(code) : Promise.resolve(null);
       return S.kline ? S.kline(code, { klt: klt, lmt: (klt === 101 ? 500 : 400) }) : [];
     })).then(function (data) {
-      var list = data || [];
-      if (klt !== 101) {
-        // 分钟K接口会带多天：只留今天的，周末/休市自然是空 → 界面给提示
-        var today = localDayStr();
-        list = list.filter(function (d) { return d && String(d.date).slice(0, 10) === today; });
+      var out = data;
+      if (klt === 5) {
+        out = (data && Array.isArray(data.items)) ? data : { prevClose: null, items: [] };
       }
-      klineCache[key] = { at: Date.now(), data: list };
-      return list;
+      klineCache[key] = { at: Date.now(), data: out };
+      return out;
     });
   }
 
@@ -1995,7 +1893,7 @@
     if ($('kChartSub')) {
       $('kChartSub').textContent = (kChartState.klt === 101)
         ? '历史日K线 · 前复权 · 滚轮/拖动缩放'
-        : '当日5分钟K线 · 前复权';
+        : '当日分时 · 价格/均价/昨收';
     }
   }
 
@@ -2024,17 +1922,19 @@
     box.innerHTML = '<div class="kEmpty">加载中…</div>';
     ensureEcharts(function () {
       if (typeof window.echarts === 'undefined') { box.innerHTML = '<div class="kEmpty">图表组件加载失败（echarts.min.js），请重进插件</div>'; return; }
-      loadKline(want.code, want.klt).then(function (list) {
+      loadKline(want.code, want.klt).then(function (data) {
         if (!kChartState || kChartState.code !== want.code || kChartState.klt !== want.klt) return; // 用户已切走
         if (kChartInst) { try { kChartInst.dispose(); } catch (e) { /* ignore */ } kChartInst = null; }
+        if (want.klt === 5) {
+          renderTrendChart(box, data || {});
+          return;
+        }
+        var list = data || [];
         if (!list || !list.length) {
-          box.innerHTML = '<div class="kEmpty">' + (want.klt === 101
-            ? '历史K线数据获取失败，请稍后重试'
-            : '当日暂无K线数据（非交易日或未开盘）') + '</div>';
+          box.innerHTML = '<div class="kEmpty">历史K线数据获取失败，请稍后重试</div>';
           return;
         }
         box.innerHTML = '';
-        var isDay = want.klt === 101;
         var cats = list.map(function (d) { return String(d.date); });
         var vals = list.map(function (d) { return [d.open, d.close, d.low, d.high]; });
         var startPct = Math.max(0, Math.round(100 - 120 / cats.length * 100));
@@ -2059,24 +1959,24 @@
                 '<br/><span style="color:' + col + '">' + (diff >= 0 ? '+' : '') + diff.toFixed(3) + '  ' + (pv >= 0 ? '+' : '') + pv.toFixed(2) + '%</span>';
             }
           },
-          grid: { left: '6%', right: '3%', top: '6%', bottom: isDay ? '16%' : '8%' },
+          grid: { left: '6%', right: '3%', top: '6%', bottom: '16%' },
           xAxis: {
             type: 'category', data: cats, boundaryGap: true,
             axisLine: { lineStyle: { color: '#3a465c' } },
             axisTick: { show: false },
-            axisLabel: { color: '#93a4bd', fontSize: 11, hideOverlap: true, formatter: function (v) { return isDay ? v.slice(5) : v.slice(11); } }
+            axisLabel: { color: '#93a4bd', fontSize: 11, hideOverlap: true, formatter: function (v) { return v.slice(5); } }
           },
           yAxis: {
             scale: true, position: 'right',
             axisLabel: { color: '#93a4bd', fontSize: 11 },
             splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.06)' } }
           },
-          dataZoom: isDay ? [
+          dataZoom: [
             { type: 'inside', start: startPct, end: 100 },
             { show: true, type: 'slider', bottom: 2, height: 16, start: startPct, end: 100,
               backgroundColor: 'rgba(255, 255, 255, 0.04)', borderColor: 'rgba(255, 255, 255, 0.12)',
               fillerColor: 'rgba(79, 172, 254, 0.14)', textStyle: { color: '#93a4bd', fontSize: 10 } }
-          ] : [{ type: 'inside', start: 0, end: 100 }],
+          ],
           series: [{
             type: 'candlestick',
             data: vals,
@@ -2090,6 +1990,83 @@
         }
       });
     });
+  }
+
+  /* 当日分时：价格线 + 均价线 + 昨收虚线基准（替代原当日5分钟K线页签） */
+  function renderTrendChart(box, trend) {
+    var items = (trend && trend.items) || [];
+    if (!items.length) {
+      box.innerHTML = '<div class="kEmpty">当日暂无分时数据（非交易日或未开盘）</div>';
+      return;
+    }
+    var prevC = (trend && trend.prevClose) || null;
+    var cats = items.map(function (d) { return d.time; });
+    var prices = items.map(function (d) { return d.price; });
+    var avgs = items.map(function (d) { return (d.avg === null || d.avg === undefined) ? null : d.avg; });
+    // 纵轴把昨收包进范围，保证基准虚线一定可见
+    var rangeOf = function (v) {
+      var lo = (prevC != null) ? Math.min(v.min, prevC) : v.min;
+      var hi = (prevC != null) ? Math.max(v.max, prevC) : v.max;
+      if (hi - lo < 1e-6) { hi += 0.01; lo -= 0.01; }
+      return { lo: lo - (hi - lo) * 0.06, hi: hi + (hi - lo) * 0.06 };
+    };
+    kChartInst = window.echarts.init(box);
+    kChartInst.setOption({
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'line', lineStyle: { color: 'rgba(79, 172, 254, 0.5)' } },
+        backgroundColor: 'rgba(14, 22, 38, 0.95)',
+        borderColor: 'rgba(79, 172, 254, 0.45)',
+        textStyle: { color: '#eaf1fb', fontSize: 12 },
+        formatter: function (ps) {
+          if (!ps || !ps.length) return '';
+          var it = items[ps[0].dataIndex];
+          if (!it) return '';
+          var pctHtml = '';
+          if (prevC) {
+            var pc = (it.price - prevC) / prevC * 100;
+            pctHtml = '<br/><span style="color:' + (pc >= 0 ? '#ff5b56' : '#17c593') + '">' + (pc >= 0 ? '+' : '') + pc.toFixed(2) + '%</span>';
+          }
+          var avgStr = (it.avg === null || it.avg === undefined) ? '--' : fmtPrice(it.avg);
+          return '<b>' + esc(it.time) + '</b><br/>价格 ' + fmtPrice(it.price) + ' · 均价 ' + avgStr + pctHtml;
+        }
+      },
+      grid: { left: '10%', right: '5%', top: '10%', bottom: '8%' },
+      xAxis: {
+        type: 'category', data: cats, boundaryGap: false,
+        axisLine: { lineStyle: { color: '#3a465c' } },
+        axisTick: { show: false },
+        axisLabel: { color: '#93a4bd', fontSize: 11, hideOverlap: true }
+      },
+      yAxis: {
+        scale: true, position: 'right',
+        min: function (v) { return rangeOf(v).lo; },
+        max: function (v) { return rangeOf(v).hi; },
+        axisLabel: { color: '#93a4bd', fontSize: 11, formatter: fmtPrice },
+        splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.06)' } }
+      },
+      series: [
+        {
+          name: '价格', type: 'line', data: prices, showSymbol: false, connectNulls: true,
+          lineStyle: { color: '#4facfe', width: 1.5 },
+          areaStyle: {
+            color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(79, 172, 254, 0.28)' },
+              { offset: 1, color: 'rgba(79, 172, 254, 0.02)' }
+            ])
+          },
+          markLine: prevC ? {
+            symbol: 'none', silent: true,
+            lineStyle: { color: '#7c8ba1', type: 'dashed', width: 1 },
+            label: { formatter: '昨收 ' + fmtPrice(prevC), color: '#93a4bd', fontSize: 10, position: 'insideEndTop' },
+            data: [{ yAxis: prevC }]
+          } : undefined
+        },
+        { name: '均价', type: 'line', data: avgs, showSymbol: false, connectNulls: true, lineStyle: { color: '#fbbf24', width: 1.2 } }
+      ]
+    });
+    setTimeout(function () { if (kChartInst) { try { kChartInst.resize(); } catch (e) { /* ignore */ } } }, 60);
   }
 
   /* ---------------- 已清仓（第三个视图：顶栏徽标 + 概览卡 + 表格列表，与我的持仓同款） ---------------- */
@@ -2155,7 +2132,7 @@
     if ($('alertStockName')) $('alertStockName').value = name || code || '';
     if ($('alertStockTitle')) $('alertStockTitle').textContent = (name || code) + ' (' + code + ') 预警';
 
-    var pStr = (price !== undefined && price !== null && !isNaN(price) && Number(price) > 0) ? '¥' + Number(price).toFixed(2) : '--';
+    var pStr = (price !== undefined && price !== null && !isNaN(price) && Number(price) > 0) ? '¥' + fmtPrice(price) : '--';
     var pctStr = (pct !== undefined && pct !== null && !isNaN(pct)) ? fmtPct(pct) : '--';
     if ($('alertStockSub')) $('alertStockSub').textContent = '最新价: ' + pStr + ' · 今日涨幅: ' + pctStr;
 
@@ -2181,8 +2158,10 @@
 
     var highPrice = $('alertHighPrice') ? parseFloat($('alertHighPrice').value) || 0 : 0;
     var lowPrice = $('alertLowPrice') ? parseFloat($('alertLowPrice').value) || 0 : 0;
-    var highChange = $('alertHighChange') ? parseFloat($('alertHighChange').value) || 0 : 0;
-    var lowChange = $('alertLowChange') ? parseFloat($('alertLowChange').value) || 0 : 0;
+    // 触发判断按符号区分方向（high_change>0 / low_change<0）：
+    // 输入框的 min/max 只是浏览器提示拦不住输入，这里把方向统一归一化，免得存进去静默失效
+    var highChange = $('alertHighChange') ? Math.abs(parseFloat($('alertHighChange').value) || 0) : 0;
+    var lowChange = $('alertLowChange') ? -Math.abs(parseFloat($('alertLowChange').value) || 0) : 0;
     var interval = $('alertInterval') ? parseInt($('alertInterval').value, 10) || 5 : 5;
 
     if (S.alerts && S.alerts.save) {
@@ -2279,7 +2258,6 @@
       tip.hidden = false;
       setTimeout(function () { tip.hidden = true; }, 2600);
     }
-    trendCache = {}; detailCache = {};
     if (currentPosSummary) {
       renderPositions(currentPosSummary);
     }
@@ -2296,9 +2274,9 @@
 
     // 顶部工具栏
     if ($('btnToggleBall')) $('btnToggleBall').addEventListener('click', toggleBall);
-    if ($('btnRefresh')) $('btnRefresh').addEventListener('click', function () { trendCache = {}; detailCache = {}; refresh(true).catch(function () {}); });
+    if ($('btnRefresh')) $('btnRefresh').addEventListener('click', function () { refresh(true).catch(function () {}); });
 
-    // K线弹窗：关闭 / 点遮罩关闭 / 切换 当日K线-历史K线
+    // K线弹窗：关闭 / 点遮罩关闭 / 切换 当日分时-历史K线
     if ($('btnKClose')) $('btnKClose').addEventListener('click', closeKChart);
     if ($('kChartModal')) $('kChartModal').addEventListener('click', function (e) { if (e.target === $('kChartModal')) closeKChart(); });
     Array.prototype.forEach.call(document.querySelectorAll('[data-kline-tab]'), function (t) {

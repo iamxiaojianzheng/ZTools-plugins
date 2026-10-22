@@ -10,10 +10,7 @@ const props = defineProps<{
   initialAlign?: AlignMode
 }>()
 
-const emit = defineEmits<{
-  update: [data: { schedules: DaySchedule[]; interval: number; align: AlignMode }]
-}>()
-
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 const weekdays = ref<number[]>([])
 const unifiedTime = ref(true)
 const unifiedRanges = ref<Array<{ startTime: string; endTime: string }>>([
@@ -101,7 +98,8 @@ function initDefaults() {
     }
     dayRangesMap.value = map
   } else {
-    weekdays.value = []
+    // 新建时默认全选星期
+    weekdays.value = [...ALL_DAYS]
     unifiedTime.value = true
     unifiedRanges.value = [{ startTime: '09:00', endTime: '18:00' }]
     dayRangesMap.value = {}
@@ -130,6 +128,23 @@ function toggleWeekday(day: number) {
     if (!unifiedTime.value) dayRangesMap.value[day] = copyRanges(unifiedRanges.value)
   }
   weekdays.value.sort()
+}
+
+const allSelected = computed(() => weekdays.value.length === ALL_DAYS.length)
+
+function toggleAll() {
+  if (allSelected.value) {
+    weekdays.value = []
+    if (!unifiedTime.value) dayRangesMap.value = {}
+  } else {
+    weekdays.value = [...ALL_DAYS]
+    // 分星期模式下补齐每个星期的时段
+    if (!unifiedTime.value) {
+      for (const day of weekdays.value) {
+        if (!dayRangesMap.value[day]) dayRangesMap.value[day] = copyRanges(unifiedRanges.value)
+      }
+    }
+  }
 }
 
 function addUnifiedRange() {
@@ -206,7 +221,10 @@ defineExpose({
 
 <template>
   <div class="form-item">
-    <label>提醒星期</label>
+    <div class="weekday-header">
+      <label>提醒星期</label>
+      <button class="btn-select-all" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</button>
+    </div>
     <div class="weekday-selector">
       <button
         v-for="(label, index) in WEEKDAY_LABELS"
@@ -323,6 +341,33 @@ defineExpose({
   font-size: 13px;
   color: var(--el-text-color-secondary);
   margin-bottom: 6px;
+}
+
+.weekday-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.weekday-header label {
+  margin-bottom: 0;
+}
+
+.btn-select-all {
+  padding: 2px 10px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-select-all:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
 }
 
 .weekday-selector {

@@ -32,6 +32,8 @@ export interface Reminder {
   // 通用
   enabled: boolean
   lastTriggered: number
+  // 最近一次已触发过的计划时刻（时间戳，用于同一时刻去重）
+  lastFiredSlot?: number
   createdAt: number
 }
 
@@ -75,7 +77,6 @@ export function createEmptyReminder(): ReminderFormData {
     schedules: [],
     interval: 60,
     align: 'start',
-    triggerAt: undefined,
     weekdays: [],
     triggerTime: '09:00',
     dayFilter: 'all'

@@ -1,10 +1,17 @@
-const SETTINGS_VERSION = 4
+const SETTINGS_VERSION = 5
 
 const DEFAULT_SOURCES = [
   {
     id: 'docker-hub',
     name: 'Docker Hub 官方',
     url: 'https://registry-1.docker.io',
+    username: '',
+    password: ''
+  },
+  {
+    id: 'ghcr',
+    name: 'GitHub GHCR 官方',
+    url: 'https://ghcr.io',
     username: '',
     password: ''
   },
@@ -106,10 +113,16 @@ export function normalizeSettings(value: unknown, defaultDownloadPath: string): 
   if (!isRecord(value)) return defaults
 
   const storedSources = readSources(value.sources)
-  const sources = value.version === SETTINGS_VERSION
-    ? storedSources
-    : migrateLegacySources(storedSources)
+  const isLegacySettings = value.version !== 4 && value.version !== SETTINGS_VERSION
+  const sources = isLegacySettings ? migrateLegacySources(storedSources) : storedSources
   if (sources.length === 0) return defaults
+  // 第四版只补充新增的官方源，保留用户删除的旧源和各源代理开关。
+  if (
+    value.version === 4 &&
+    !sources.some((source) => source.id === 'ghcr' || /^(?:https?:\/\/)?ghcr\.io\/?$/i.test(source.url.trim()))
+  ) {
+    sources.push({ ...DEFAULT_SOURCES.find((source) => source.id === 'ghcr')!, proxyEnabled: false })
+  }
 
   const selectedSourceId = sources.some((source) => source.id === value.selectedSourceId)
     ? String(value.selectedSourceId)
@@ -118,7 +131,7 @@ export function normalizeSettings(value: unknown, defaultDownloadPath: string): 
   const normalizedSources = sources.map((source) => ({
     ...source,
     proxyEnabled: source.proxyEnabled || (
-      value.version !== SETTINGS_VERSION &&
+      isLegacySettings &&
       source.id === selectedSourceId &&
       (
         proxyValue.enabled === true ||

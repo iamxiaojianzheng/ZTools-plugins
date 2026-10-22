@@ -8,9 +8,6 @@
   var watchlist = [];
   var quoteMap = {};
   var idxList = [];
-  var expanded = null;
-  var trendCache = {};
-  var detailCache = {};
   var lastUpdate = 0;
   var failCount = 0;
   var refreshTimer = null;
@@ -21,6 +18,14 @@
   var currentDtCode = null;
 
   /* ---------------- 小工具 ---------------- */
+  /* 流水时间：created_at 是 UTC ISO，转本地再格式化（直切字符串显示会早8小时） */
+  function txDateTime(ts) {
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return String(ts || '').replace('T', ' ').slice(0, 16);
+    var m = d.getMonth() + 1, day = d.getDate();
+    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day +
+      ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function timeStr(ts) {
     var d = new Date(ts);
@@ -87,6 +92,9 @@
   function refreshImpl(force) {
     // force === true（手动刷新按钮）：连非交易时段也强制重拉，透传给 preload 的 force 通道
     var fOpts = (force === true) ? { force: true } : undefined;
+    // 三条子链路都在内部兜底（reject 被吃掉变 null/[]），外层 Promise.all 永不 reject；
+    // 失败必须靠 anyFail 标记传出来，否则 failCount 恒 0，「行情获取失败」提示与退避重试永不生效
+    var anyFail = false;
     // 1. 持仓实时行情（只请求持仓个股，拿到立刻更新持仓看板）
     var posP = safeCall(function () { return S.positions ? S.positions.get(fOpts) : Promise.resolve(null); })
       .then(function (summary) {
@@ -94,7 +102,7 @@
           renderPositions(summary);
         }
         return summary;
-      }).catch(function () { return null; });
+      }).catch(function () { anyFail = true; return null; });
 
     // 2. 自选股行情（拿到立刻更新自选列表）
     var qP = safeCall(function () { return S.quotes ? S.quotes(fOpts) : Promise.resolve([]); })
@@ -106,7 +114,7 @@
           renderList();
         }
         return list;
-      }).catch(function () { return []; });
+      }).catch(function () { anyFail = true; return []; });
 
     // 3. 大盘四大指数（拿到立刻更新顶部指数横幅）
     var ixP = safeCall(function () { return S.indexes ? S.indexes(fOpts) : Promise.resolve([]); })
@@ -116,17 +124,21 @@
           renderIndexes();
         }
         return indexes;
-      }).catch(function () { return []; });
+      }).catch(function () { anyFail = true; return []; });
 
     return Promise.all([posP, qP, ixP]).then(function () {
-      failCount = 0;
-      lastUpdate = Date.now();
-      renderStatus();
-    }).catch(function (err) {
-      failCount += 1;
+      if (anyFail) {
+        failCount += 1;
+      } else {
+        failCount = 0;
+        lastUpdate = Date.now();
+      }
       renderStatus();
       // 隐藏期间不再后台重试，回前台由 visibilitychange 补
-      if (!document.hidden) setTimeout(refresh, Math.min(30000, 4000 * failCount));
+      if (anyFail && !document.hidden) setTimeout(refresh, Math.min(30000, 4000 * failCount));
+    }).catch(function () {
+      failCount += 1;
+      renderStatus();
     });
   }
 
@@ -146,24 +158,6 @@
     // 刚刷新过就不再打一轮：快速切换标签页不产生多余请求（1.5s 内视为仍新鲜）
     if (Date.now() - lastUpdate >= 1500) refresh().catch(function () {}).then(loopRefresh);
   });
-
-  function loadTrend(code, force) {
-    var hit = trendCache[code];
-    if (!force && hit && Date.now() - hit.at < 20000) return Promise.resolve(hit.data);
-    return rethrow(safeCall(function () { return S.trend(code); })).then(function (data) {
-      trendCache[code] = { at: Date.now(), data: data };
-      return data;
-    });
-  }
-
-  function loadDetail(code, force) {
-    var hit = detailCache[code];
-    if (!force && hit && Date.now() - hit.at < 20000) return Promise.resolve(hit.data);
-    return rethrow(safeCall(function () { return S.detail(code); })).then(function (data) {
-      detailCache[code] = { at: Date.now(), data: data };
-      return data;
-    });
-  }
 
   /* ---------------- 状态与指数 ---------------- */
   function renderStatus() {
@@ -517,10 +511,9 @@
       var q = quoteMap[w.code] || {};
       var pct = q.pct === undefined ? null : q.pct;
       var price = q.price === undefined ? null : q.price;
-      var chg = q.chg !== undefined && q.chg !== null ? q.chg : (price !== null && q.prevClose ? price - q.prevClose : null);
+      var chg = q.change !== undefined && q.change !== null ? q.change : (price !== null && q.prevClose ? price - q.prevClose : null);
       var name = w.name || q.name || w.code;
-      var isOpen = expanded === w.code;
-      var row = '<div class="stock' + (isOpen ? ' open' : '') + '" data-code="' + esc(w.code) + '" draggable="true">' +
+      var row = '<div class="stock" data-code="' + esc(w.code) + '" draggable="true">' +
         '<div class="line">' +
           '<div class="dragHandle" title="拖动排序">⠿</div>' +
           '<div class="nm">' +
@@ -539,17 +532,11 @@
           '</div>' +
         '</div>';
 
-      if (isOpen) {
-        row += '<div class="detail" data-detail="' + esc(w.code) + '">' +
-          '<canvas></canvas>' +
-          '<div class="grid" data-stats></div>' +
-          '</div>';
-      }
       row += '</div>';
       return row;
     }).join('');
 
-    // 列表内容没变就只刷新展开的详情；拖拽过程中不重建（否则会把正在拖的元素删掉）
+    // 内容没变就不重建 DOM；拖拽过程中不重建（否则会把正在拖的元素删掉）
     var rebuilt = !dragState && setHtml(box, listHtml);
     if (rebuilt) Array.prototype.forEach.call(box.querySelectorAll('.stock'), function (el) {
       var code = el.getAttribute('data-code');
@@ -595,8 +582,6 @@
       });
 
       el.querySelector('.line').addEventListener('click', function (ev) {
-        // 点击拖动手柄不触发展开
-        if (ev.target && ev.target.classList && ev.target.classList.contains('dragHandle')) return;
         var opBtn = ev.target && ev.target.closest ? ev.target.closest('[data-op]') : null;
         if (opBtn) {
           ev.stopPropagation();
@@ -614,7 +599,6 @@
             var itemName = (watchlist.find(function (x) { return x.code === code; }) || {}).name || code;
             showConfirm('确定要删除「' + itemName + '（' + code + '）」吗？（它的预警提醒也会一并取消）', function () {
               S.watchlist.remove(code);
-              if (expanded === code) expanded = null;
               renderGroupTabs();
               renderList();
             }, '删除自选股', '确定删除');
@@ -622,109 +606,12 @@
           }
           return;
         }
-        expanded = (expanded === code) ? null : code;
-        renderList();
-        if (expanded) hydrateDetail(code);
       });
       el.querySelector('.line').addEventListener('dblclick', function () {
         var mkt = /^[659]/.test(code) ? 'sh' : 'sz';
         S.host && S.host.openUrl('https://quote.eastmoney.com/' + mkt + code + '.html');
       });
     });
-
-    if (expanded) hydrateDetail(expanded);
-  }
-
-  function hydrateDetail(code) {
-    var el = document.querySelector('.detail[data-detail="' + code + '"]');
-    if (!el) return;
-    var canvas = el.querySelector('canvas');
-    var stats = el.querySelector('[data-stats]');
-    var q = quoteMap[code] || {};
-    loadTrend(code).then(function (data) {
-      drawTrend(canvas, data, q);
-      if (stats && !stats.getAttribute('data-filled')) {
-        stats.setAttribute('data-filled', '1');
-        renderStats(stats, q, data);
-      }
-    }).catch(function () {
-      var ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#93a4bd';
-      ctx.font = '12px Microsoft YaHei';
-      ctx.textAlign = 'center';
-      ctx.fillText('分时数据获取失败，稍后自动重试', canvas.clientWidth / 2, 54);
-    });
-    loadDetail(code).then(function (d) {
-      if (stats) { stats.removeAttribute('data-filled'); renderStats(stats, Object.assign({}, q, d), trendCache[code] && trendCache[code].data); }
-    }).catch(function () {});
-  }
-
-  function renderStats(box, q, trend) {
-    var prev = (trend && trend.prevClose) || q.prevClose;
-    var items = [
-      ['今开', fmtPrice(q.open)], ['最高', fmtPrice(q.high)], ['最低', fmtPrice(q.low)],
-      ['昨收', fmtPrice(prev)], ['成交量', q.volume === null || q.volume === undefined ? '--' : fmtBig(q.volume * 100) + '股'],
-      ['成交额', fmtBig(q.amount)], ['换手率', q.turnover === null || q.turnover === undefined ? '--' : q.turnover + '%'],
-      ['量比', q.volumeRatio === null || q.volumeRatio === undefined ? '--' : q.volumeRatio],
-      ['市盈率', q.pe === null || q.pe === undefined ? '--' : q.pe]
-    ];
-    box.innerHTML = items.map(function (it) {
-      return '<div><span>' + it[0] + '</span> <b>' + esc(it[1]) + '</b></div>';
-    }).join('');
-  }
-
-  function drawTrend(canvas, data, q) {
-    if (!canvas) return;
-    var dpr = window.devicePixelRatio || 1;
-    var w = canvas.clientWidth || 380;
-    var h = canvas.clientHeight || 108;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    var ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-
-    var items = (data && data.items) || [];
-    if (items.length < 2) {
-      ctx.fillStyle = '#93a4bd';
-      ctx.font = '12px Microsoft YaHei';
-      ctx.textAlign = 'center';
-      ctx.fillText(items.length ? '暂无足够分时数据' : '暂无分时数据（可能未开盘）', w / 2, h / 2);
-      return;
-    }
-    var prev = (data && data.prevClose) || (q && q.prevClose) || items[0].price;
-    var prices = items.map(function (x) { return x.price; });
-    var min = Math.min.apply(null, prices.concat([prev]));
-    var max = Math.max.apply(null, prices.concat([prev]));
-    if (max - min < 1e-6) { max += 0.01; min -= 0.01; }
-    var padY = (max - min) * 0.12;
-    min -= padY; max += padY;
-    var y = function (v) { return h - ((v - min) / (max - min)) * h; };
-    var x = function (i) { return (i / (items.length - 1)) * w; };
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    var prevY = Math.round(y(prev)) + 0.5;
-    ctx.moveTo(0, prevY); ctx.lineTo(w, prevY);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.strokeStyle = '#4facfe';
-    ctx.lineWidth = 1.5;
-    items.forEach(function (it, i) {
-      var px = x(i), py = y(it.price);
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    });
-    ctx.stroke();
-
-    ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
-    var grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, 'rgba(79,172,254,0.3)');
-    grad.addColorStop(1, 'rgba(79,172,254,0.0)');
-    ctx.fillStyle = grad;
-    ctx.fill();
   }
 
   /* ---------------- Tab 切换 ---------------- */
@@ -804,7 +691,7 @@
 
     codeInput.value = o.code || '';
     nameInput.value = o.name || '';
-    priceInput.value = (o.price !== undefined && o.price !== null && o.price !== '') ? Number(o.price).toFixed(2) : '';
+    priceInput.value = (o.price !== undefined && o.price !== null && o.price !== '') ? fmtPrice(o.price) : '';
     if (qtyInput) {
       qtyInput.step = '100';
       qtyInput.min = '100';
@@ -1025,7 +912,7 @@
       var sorted = list.slice().sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
       dtBox.innerHTML = sorted.map(function (t) {
         var isBuy = Number(t.type) === 1;
-        var dateStr = (t.created_at || '').replace('T', ' ').slice(0, 16);
+        var dateStr = txDateTime(t.created_at);
         var fees = (Number(t.commission || 0) + Number(t.transfer_fee || 0) + Number(t.stamp_tax || 0));
         var feeTag = fees > 0 ? (' <span style="font-size:11px;color:#f6ad55;">(手续费 ¥' + fees.toFixed(2) + ')</span>') : '';
         return '<div class="dtItem">' +
@@ -1035,7 +922,7 @@
             feeTag +
           '</div>' +
           '<div style="font-variant-numeric:tabular-nums;">' +
-            '¥' + Number(t.price).toFixed(2) + ' × ' + t.quantity + '股 = <b>¥' + Number(t.total_price || (t.price * t.quantity)).toFixed(2) + '</b>' +
+            '¥' + fmtPrice(t.price) + ' × ' + t.quantity + '股 = <b>¥' + Number(t.total_price || (t.price * t.quantity)).toFixed(2) + '</b>' +
           '</div>' +
           '<button class="dtDel" data-id="' + t.id + '" title="删除此记录">删除</button>' +
         '</div>';
@@ -1091,7 +978,7 @@
           $('txName').value = r.name;
           $('txSuggest').hidden = true;
           safeCall(function () { return S.detail(r.code); }).then(function (d) {
-            if (d && d.price) { $('txPrice').value = Number(d.price).toFixed(2); calcTxTotal(); }
+            if (d && d.price) { $('txPrice').value = fmtPrice(d.price); calcTxTotal(); }
           }).catch(function () {});
         });
       }).catch(function () {});
@@ -1163,7 +1050,6 @@
     var tip = $('saveTip');
     tip.hidden = false;
     setTimeout(function () { tip.hidden = true; }, 2600);
-    trendCache = {}; detailCache = {};
     refresh().catch(function () {});
     loopRefresh();
   }
@@ -1184,7 +1070,7 @@
     else { S.host.ball('show'); setTimeout(function () { refresh().catch(function () {}); }, 800); }
   });
 
-  $('btnRefresh').addEventListener('click', function () { trendCache = {}; detailCache = {}; refresh(true).catch(function () {}); });
+  $('btnRefresh').addEventListener('click', function () { refresh(true).catch(function () {}); });
   $('btnSettings').addEventListener('click', function () { switchTab(activeTab === 'settings' ? 'positions' : 'settings'); });
   $('btnClose').addEventListener('click', function () { (S.closeSelf || function () {})(); });
   $('btnBack').addEventListener('click', function () { switchTab('positions'); });

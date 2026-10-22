@@ -1,10 +1,10 @@
 /*
- * 已清仓显示 + K线（当日K线/历史K线）功能测试。
+ * 已清仓显示 + K线（当日分时/历史K线）功能测试。
  *
  * 需求：
  *  1) 持仓页要有「已清仓」股票的显示（折叠区，含清仓日期与累计盈亏）；
  *  2) 持仓 / 自选行情 / 已清仓 三处的股票都能打开 K线弹窗，
- *     分「当日K线」（当日5分钟蜡烛）与「历史K线」（日K蜡烛）两个页签。
+ *     分「当日分时」（价格/均价/昨收基准，替代原当日5分钟蜡烛）与「历史K线」（日K蜡烛）两个页签。
  *
  * 数据链路：
  *  store.getClosedPositions → preload positions.getClosed → index.js renderClosed
@@ -33,10 +33,22 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 const httpclient = require(path.join(PLUGIN_DIR, 'lib', 'httpclient.js'));
 const capturedUrls = [];
 let failMinute = false;
+let trendDown = false;   // 模拟东财 trends2 挂掉（测腾讯分钟兜底）
 httpclient.httpGetJSON = async (url) => {
-  if (failMinute && String(url).indexOf('klt=5') >= 0) throw new Error('模拟分钟K失败');
-  capturedUrls.push(String(url));
-  if (String(url).indexOf('push2his.eastmoney.com') >= 0) {
+  // 注意：market.js 在 require 时就解构持有了这个函数引用，之后不能再整体换桩 ——
+  // 所有分支（K线/分时/腾讯兜底）都挂在这同一个桩里，用开关切换。
+  const u = String(url);
+  if (u.indexOf('minute/query') >= 0) {
+    if (!trendDown) throw new Error('意外请求: ' + url);
+    return { data: { sh600961: {
+      data: { date: '20260929', data: ['0930 10.00 100 100000.00', '0931 10.50 300 306000.00'] },
+      qt: { sh600961: ['1', '株冶集团', '600961', '10.50', '10.00', '10.05'] }
+    } } };
+  }
+  if (u.indexOf('trends2') >= 0 && trendDown) throw new Error('socket hang up');
+  if (failMinute && u.indexOf('klt=5') >= 0) throw new Error('模拟分钟K失败');
+  capturedUrls.push(u);
+  if (u.indexOf('push2his.eastmoney.com') >= 0) {
     return { data: { name: '株冶集团', klines: [
       '2026-09-22 09:35,10.10,10.20,10.35,10.05,50000,51000,0',
       '2026-09-22 09:40,10.20,10.15,10.30,10.10,40000,40800,0'
@@ -63,6 +75,16 @@ const market = require(path.join(PLUGIN_DIR, 'lib', 'market.js'));
   const missing = await market.kline('600961', { klt: 5 });
   ok(Array.isArray(missing) && missing.length === 0, '分钟K失败不走腾讯日K兜底，返回空数组', missing);
   failMinute = false;
+
+  console.log('== 1.5 market.trend：东财分时挂了自动切腾讯分钟兜底 ==');
+  trendDown = true;
+  const tr = await market.trend('600961');
+  trendDown = false;
+  ok(tr.source === 'tencent', '走的是腾讯兜底', tr.source);
+  ok(tr.items.length === 2 && tr.items[0].time === '09:30' && tr.items[1].price === 10.5, '分钟行解析（时间/价格）', tr.items);
+  ok(tr.prevClose === 10, '昨收取自 qt[4]', tr.prevClose);
+  ok(Math.abs(tr.items[1].avg - 10.2) < 1e-9, '均价 = 累计额/(累计量×100)', tr.items[1] && tr.items[1].avg);
+  ok(tr.items[1].volume === 200 && tr.items[1].amount === 206000, '分钟增量量额', tr.items[1]);
 
   console.log('== 2. store.getClosedPositions：清仓日期与内容 ==');
   const storeReal = require(path.join(PLUGIN_DIR, 'lib', 'store.js'));
@@ -158,7 +180,11 @@ const market = require(path.join(PLUGIN_DIR, 'lib', 'market.js'));
   const stoSrc = fs.readFileSync(path.join(PLUGIN_DIR, 'lib', 'store.js'), 'utf8');
 
   ok(idxHtml.includes('id="kChartModal"'), 'index.html 有 K线弹窗');
-  ok(idxHtml.includes('data-kline-tab="5"') && idxHtml.includes('data-kline-tab="101"'), '有 当日K线/历史K线 两个页签');
+  ok(idxHtml.includes('data-kline-tab="5"') && idxHtml.includes('data-kline-tab="101"'), '有 当日分时/历史K线 两个页签');
+  ok(idxHtml.includes('当日分时') && !idxHtml.includes('>当日K线<'), '页签文案已是「当日分时」');
+  ok(idxJs.includes("if (klt === 5) return S.trend") && idxJs.includes('function renderTrendChart'), '当日页签数据源为分时 trend（替代分钟K）');
+  ok(idxJs.includes('昨收 ') && idxJs.includes('均价'), '分时图含昨收基准与均价线');
+  ok(!idxJs.includes('当日5分钟K线 · 前复权'), '旧的当日5分钟K线副标题文案已移除');
   ok(idxHtml.includes('id="kChartBox"') && idxHtml.includes('id="btnKClose"'), '有图表容器与关闭按钮');
   ok(idxHtml.includes('id="viewClosed"') && idxHtml.includes('id="closedTableHeader"') && idxHtml.includes('id="closedEmpty"'), 'index.html 有已清仓独立视图（表头+空态，与持仓页同结构）');
   ok(idxHtml.includes('id="tabClosed"') && idxHtml.includes('id="closedCountBadge"'), '顶部「已清仓」标签按钮 + 数量徽标');

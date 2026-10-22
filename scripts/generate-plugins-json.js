@@ -385,17 +385,11 @@ function mergePluginManifests(currentPlugins, previousPlugins, buildInfo) {
     return currentPlugins;
   }
 
-  const changedNames = new Set((buildInfo.changedPlugins || []).map(normalizePluginName));
   const deletedNames = new Set((buildInfo.deletedPlugins || []).map(normalizePluginName));
-  const previousByName = new Map(previousPlugins.map(plugin => [normalizePluginName(plugin.name), plugin]));
   const currentNames = new Set(currentPlugins.map(plugin => normalizePluginName(plugin.name)));
-  const merged = currentPlugins.map(plugin => {
-    const key = normalizePluginName(plugin.name);
-    if (key && previousByName.has(key) && !changedNames.has(key)) {
-      return previousByName.get(key);
-    }
-    return plugin;
-  });
+  // 当前条目均来自本次构建的 ZIP，必须优先于历史数据。
+  // changedPlugins 使用目录名，不能用它与 plugin.json 的 name 判断是否更新。
+  const merged = [...currentPlugins];
 
   // 保留历史中未参与本次构建的插件；显式删除的插件不会被带回。
   for (const plugin of previousPlugins) {

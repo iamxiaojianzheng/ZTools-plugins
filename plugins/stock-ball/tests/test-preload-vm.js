@@ -4,6 +4,7 @@
  * 菜单展开收起、心跳去重、跨窗口通信、以及真实行情数据。
  *
  *   node tests/test-preload-vm.js
+ *   node tests/test-preload-vm.js --offline （隔离行情接口，验证窗口交互）
  */
 'use strict';
 const fs = require('node:fs');
@@ -12,6 +13,16 @@ const vm = require('node:vm');
 
 const PLUGIN_DIR = path.join(__dirname, '..');
 const CH = 'sb:cmd';
+
+if (process.argv.includes('--offline')) {
+  const market = require(path.join(PLUGIN_DIR, 'lib', 'market.js'));
+  market.quotes = async (ids) => ids.map((secid) => ({ secid, code: secid.split('.').pop(), name: '测试', price: 10, pct: 0 }));
+  market.quotesTencent = market.quotes;
+  market.indexes = async () => [0, 1, 2].map((i) => ({ name: '测试指数' + i, price: 3000 }));
+  market.trend = async () => ({ items: Array.from({ length: 40 }, () => ({ price: 10 })) });
+  market.search = async () => [{ code: '300547', secid: '0.300547', name: '川环科技' }];
+  market.detail = async () => ({ code: '300547', name: '川环科技', price: 10 });
+}
 
 let pass = 0;
 let fail = 0;
@@ -320,14 +331,15 @@ function runPreload(ctx, url) {
   host.window.services.onCtl((c) => { if (c && c.cmd === 'switch-tab') tabSwitched = c; });
   const redirectsBefore = redirectCalls.length;
   const showBefore = showMainWindowCalls;
-  ballSvc.host.openPlugin('stock');
-  await sleep(100);
+  await ballSvc.host.openPlugin('stock');
+  await sleep(750);
   ok(showMainWindowCalls > showBefore, 'ZTools showMainWindow 被调用');
   ok(redirectCalls.length > redirectsBefore, 'ZTools redirect 被调用');
   const lastRedirect = redirectCalls[redirectCalls.length - 1];
   ok(lastRedirect && lastRedirect.label === 'stock', 'redirect 的目标是 stock', lastRedirect);
   ok(lastRedirect && lastRedirect.payload === undefined, 'redirect 没有传入空字符串 payload（避免误入子输入框模式）', lastRedirect);
   ok(!!tabSwitched && tabSwitched.tab === 'positions', '主窗口收到 switch-tab positions 指令', tabSwitched);
+  ok(redirectCalls.length === redirectsBefore + 1, '主窗口已确认时不重复执行子窗口兜底');
 
   console.log('== 8. 面板窗口（球点一下就能开） ==');
   ok(typeof ballSvc.host.panel === 'function', '球有 host.panel');
@@ -361,17 +373,23 @@ function runPreload(ctx, url) {
   const hb2 = dbMap.get('sb.heartbeat');
   ok(!!hb2 && hb2.id === null, '心跳已清空（下次进入才会重开球）', hb2);
 
-  console.log('== 10. 新会话进入：不会再开第二个球 ==');
+  console.log('== 10. 新会话进入：孤儿球被守望进程收编替换（不并存第二个） ==');
   const created0 = created.length;
   const host2 = { id: 900, role: 'host', listeners: {}, window: null };
   contexts.push(host2);
   runPreload(host2, 'file:///plugin/index.html');
   await sleep(20);
-  // 先让球重新跑起来（模拟「球已在桌面上」）
+  // 模拟「球已在桌面上，但本上下文没有它的句柄」（主窗口重载后的孤儿球）：
+  // 旧球的上行通道对着已换代的主窗口，拖动/双击永远无响应 ——
+  // 守望进程必须 die+重建完成收编（新球新握手），放任不管正是拖动卡死 Bug 的根源。
+  // 真实的主窗口重载会销毁旧上下文（其守望进程随之消亡），测试里手动停掉 host 的
+  // 守望进程模拟这一点 —— 否则新旧两个守望进程会互相抢收编对方重建的球。
+  host.window.sbHost.endPlugin();
+  await sleep(20);
   dbMap.set('sb.heartbeat', { id: 555, t: Date.now(), role: 'ball' });
   host2.window.exports['stock-ball'].args.enter();
-  await sleep(1400);
-  ok(created.length === created0, '有心跳时不再重复创建球窗口', created.length - created0);
+  await sleep(2200);   // 守望进程 1s tick + 600ms 重建延迟
+  ok(created.length === created0 + 1, '孤儿球被收编：恰好替换重建 1 个，不并存第二个', created.length - created0);
   ok(!notifications.some((n) => /已经在桌面/.test(n)), '进入插件时不弹「已经在桌面上」打扰提示', notifications);
 
   console.log('== 11. 退出插件 ==');

@@ -136,6 +136,19 @@ export function useStore() {
     persistMeta()
   }
 
+  /**
+   * 记录某张表手动拖动后的列宽（列 id → px）。
+   * 传空对象即清空记录、恢复「按内容自适应」。
+   */
+  function setColumnWidths(tableId: string, widths: Record<string, number>) {
+    const t = meta.value.tables.find((x) => x.id === tableId)
+    if (!t) return
+    if (Object.keys(widths).length) t.columnWidths = { ...widths }
+    else delete t.columnWidths
+    t.updatedAt = Date.now()
+    persistMeta()
+  }
+
   /** 新增字段回填默认值：更新内存行 + bulkDocs 一次持久化整表 */
   async function backfillRows(tableId: string, rows: Row[]): Promise<void> {
     rowsByTable.value = { ...rowsByTable.value, [tableId]: rows }
@@ -290,6 +303,7 @@ function collectAllRows(): Record<string, Row[]> {
     setMultiSeparator,
     setQuickTableId,
     setRowHeightMode,
+    setColumnWidths,
     backfillRows,
     createRow,
     saveRow,

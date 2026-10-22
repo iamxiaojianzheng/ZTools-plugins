@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/@ztools-center/ztools-api-types/resource/ztools.schema.json",
+  "name": "worldme-music",
+  "title": "Worldme音乐",
+  "description": "插件化、可定制的音乐播放器。不内置任何音源，加载兼容 MusicFree 协议的音源即可搜索歌曲 / 专辑 / 歌手 / 歌单，浏览榜单，在线播放并显示逐行歌词与桌面歌词，支持导入、下载、收藏与播放队列。玻璃拟态沉浸式界面，深浅色随 ZTools 主题联动。",
+  "author": "WorldmeQC",
+  "version": "1.1.1",
+  "main": "dist/index.html",
+  "preload": "preload/services.js",
+  "logo": "logo.png",
+  "development": {
+    "main": "http://localhost:5173"
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "音乐播放器：搜索并播放在线歌曲",
+      "icon": "logo.png",
+      "cmds": [
+        "音乐",
+        "music",
+        "播放器",
+        "听歌",
+        "worldme",
+        {
+          "type": "regex",
+          "label": "音乐搜索",
+          "match": "/^(?:音乐|music|听歌|播放)\\s+(.+)$/i",
+          "minLength": 2
+        }
+      ]
+    }
+  ],
+  "platform": [
+    "darwin",
+    "win32",
+    "linux"
+  ]
+}

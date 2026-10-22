@@ -7,10 +7,6 @@ const props = defineProps<{
   initialTime?: string
 }>()
 
-const emit = defineEmits<{
-  update: [data: { date: string; time: string }]
-}>()
-
 const onceDate = ref('')
 const onceTime = ref('09:00')
 
@@ -43,8 +39,6 @@ function validate(): boolean {
 
 function getData() {
   return {
-    date: onceDate.value,
-    time: onceTime.value,
     triggerAt: buildTriggerAt()
   }
 }

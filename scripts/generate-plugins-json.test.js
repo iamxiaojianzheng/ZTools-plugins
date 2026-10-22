@@ -43,6 +43,27 @@ test('mergePluginManifests supports deletion-only releases', () => {
   assert.deepEqual(merged, [previous[0]]);
 });
 
+test('mergePluginManifests keeps rebuilt metadata when the directory differs from the plugin name', () => {
+  const previous = [{
+    name: 'encode-helper',
+    version: '2.0.2',
+    downloadUrl: 'https://example.test/old/encode-2.0.2.zip',
+  }];
+  const current = [{
+    name: 'encode-helper',
+    title: '编码助手',
+    version: '2.0.2',
+    downloadUrl: 'https://example.test/new/encode-2.0.2.zip',
+  }];
+
+  const merged = mergePluginManifests(current, previous, {
+    changedPlugins: ['encode'],
+    deletedPlugins: [],
+  });
+
+  assert.deepEqual(merged, current);
+});
+
 test('mergePluginManifests treats build-all as the complete repository snapshot', () => {
   const previous = [
     { name: 'keep', version: '1.0.0', downloadUrl: 'https://example.test/keep.zip' },

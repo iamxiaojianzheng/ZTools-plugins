@@ -159,6 +159,12 @@ function makeTime(year, month, day, hour, minute) {
 }
 // 2026-09-21 周一 10:00 (交易中)
 assert.strictEqual(market.isTradingTime(makeTime(2026, 9, 21, 10, 0)), true, '周一 10:00 应处于交易时段');
+// 2026-09-21 周一 09:10 (早盘开始获取与判定)
+assert.strictEqual(market.isTradingTime(makeTime(2026, 9, 21, 9, 10)), true, '周一 09:10 早盘开盘前应已进入交易/获取时段');
+// 2026-09-21 周一 09:15 (集合竞价时段)
+assert.strictEqual(market.isTradingTime(makeTime(2026, 9, 21, 9, 15)), true, '周一 09:15 应处于交易/获取时段');
+// 2026-09-21 周一 09:05 (早盘未开盘)
+assert.strictEqual(market.isTradingTime(makeTime(2026, 9, 21, 9, 5)), false, '周一 09:05 未到 09:10 不属于交易时段');
 // 2026-09-21 周一 12:00 (午间休市)
 assert.strictEqual(market.isTradingTime(makeTime(2026, 9, 21, 12, 0)), false, '周一 12:00 午间休市不属于交易时段');
 // 2026-09-21 周一 14:00 (交易中)
@@ -169,7 +175,7 @@ assert.strictEqual(market.isTradingTime(makeTime(2026, 9, 21, 15, 30)), false, '
 assert.strictEqual(market.isTradingTime(makeTime(2026, 9, 21, 8, 30)), false, '周一 08:30 盘前不属于交易时段');
 // 2026-09-20 周日 10:00 (周末休市)
 assert.strictEqual(market.isTradingTime(makeTime(2026, 9, 20, 10, 0)), false, '周日全天休市不属于交易时段');
-console.log('✓ 非交易时间段判定准确（早盘前、午休、盘后、周末均精确识别）');
+console.log('✓ 非交易时间段判定准确（09:10 起早盘放行、早盘前、午休、盘后、周末均精确识别）');
 
 // 5. 验证非交易时间段静默防打扰（不弹出通知）
 const nonTradingNotifications = [];

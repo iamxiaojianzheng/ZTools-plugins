@@ -404,6 +404,116 @@ test('从模拟 Registry 导出多层镜像', async () => {
   }
 })
 
+/** 验证 GHCR 占位认证范围、令牌刷新和跨域镜像层下载。 */
+test('兼容 GHCR 认证与镜像导出', async (context) => {
+  for (const username of ['', 'github-user']) {
+    await context.test(username ? '使用用户名和个人访问令牌下载私有镜像' : '匿名下载公开镜像', async () => {
+      const layerTar = createLayerTar('ghcr.txt', Buffer.from('来自 GitHub 的镜像层'))
+      const compressedLayer = zlib.gzipSync(layerTar)
+      const config = Buffer.from(JSON.stringify({
+        architecture: 'amd64',
+        os: 'linux',
+        rootfs: { type: 'layers', diff_ids: [sha256(layerTar)] }
+      }))
+      const configDescriptor = {
+        mediaType: 'application/vnd.oci.image.config.v1+json',
+        digest: sha256(config),
+        size: config.length
+      }
+      const layerDescriptor = {
+        mediaType: 'application/vnd.oci.image.layer.v1.tar+gzip',
+        digest: sha256(compressedLayer),
+        size: compressedLayer.length
+      }
+      const manifest = Buffer.from(JSON.stringify({
+        schemaVersion: 2,
+        mediaType: 'application/vnd.oci.image.manifest.v1+json',
+        config: configDescriptor,
+        layers: [layerDescriptor]
+      }))
+      const blobs = new Map([[configDescriptor.digest, config], [layerDescriptor.digest, compressedLayer]])
+      const blobAuthorizations = []
+      const tokenScopes = []
+      const tokenAuthorizations = []
+      const expectedBasic = username ? `Basic ${Buffer.from(`${username}:test-pat`).toString('base64')}` : undefined
+      let tokenRequests = 0
+      let port = 0
+      const cdn = http.createServer((request, response) => {
+        blobAuthorizations.push(request.headers.authorization)
+        const blob = blobs.get(decodeURIComponent(request.url.slice(1)))
+        response.writeHead(blob ? 200 : 404)
+        response.end(blob)
+      })
+      const cdnPort = await listen(cdn)
+      const server = http.createServer((request, response) => {
+        const url = new URL(request.url, `http://127.0.0.1:${port}`)
+        const challenge = `Bearer realm="http://127.0.0.1:${port}/token",service="ghcr.io",scope="repository:${url.pathname === '/v2/' ? 'user/image' : 'acme/demo'}:pull"`
+        if (url.pathname === '/token') {
+          tokenScopes.push(url.searchParams.get('scope'))
+          tokenAuthorizations.push(request.headers.authorization)
+          if (url.searchParams.get('scope') !== 'repository:acme/demo:pull' || request.headers.authorization !== expectedBasic) {
+            response.writeHead(403)
+            response.end()
+            return
+          }
+          tokenRequests += 1
+          // 同时覆盖两种标准令牌响应字段。
+          sendJson(response, Buffer.from(JSON.stringify(tokenRequests === 1 ? { token: 'expired-token' } : { access_token: 'ghcr-token' })))
+          return
+        }
+        if (url.pathname === '/v2/' || request.headers.authorization !== 'Bearer ghcr-token') {
+          response.writeHead(401, { 'WWW-Authenticate': challenge })
+          response.end()
+          return
+        }
+        if (url.pathname === '/v2/acme/demo/manifests/v1') {
+          sendJson(response, manifest, sha256(manifest), 'application/vnd.oci.image.manifest.v1+json')
+          return
+        }
+        const digest = decodeURIComponent(url.pathname.split('/blobs/')[1] || '')
+        if (blobs.has(digest)) {
+          response.writeHead(307, { Location: `http://127.0.0.1:${cdnPort}/${digest}` })
+          response.end()
+          return
+        }
+        response.writeHead(404)
+        response.end()
+      })
+      let directory = ''
+      try {
+        port = await listen(server)
+        directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'docker-image-ghcr-'))
+        const service = new DockerImageService()
+        const started = service.startDownload({
+          image: 'ghcr.io/acme/demo:v1',
+          source: 'custom',
+          customRegistry: `http://127.0.0.1:${port}`,
+          platform: 'linux/amd64',
+          outputDir: directory,
+          proxyMode: 'none',
+          username,
+          password: username ? 'test-pat' : ''
+        })
+        const completed = await waitForTerminalTask(service, started.id, 5000)
+        assert.equal(completed.status, 'completed', completed.error)
+        assert.deepEqual(tokenScopes, ['repository:acme/demo:pull', 'repository:acme/demo:pull'])
+        assert.deepEqual(tokenAuthorizations, [expectedBasic, expectedBasic])
+        assert.ok(blobAuthorizations.length >= 2)
+        assert.equal(blobAuthorizations.every((authorization) => authorization === undefined), true)
+        assert.equal(completed.fileName, 'ghcr.io_acme_demo_v1_linux_amd64.tar')
+        const archive = parseTar(await fsp.readFile(completed.outputPath))
+        const [dockerManifest] = JSON.parse(archive.get('manifest.json').toString('utf8'))
+        assert.deepEqual(dockerManifest.RepoTags, ['ghcr.io/acme/demo:v1'])
+        assert.deepEqual(archive.get(dockerManifest.Layers[0]), layerTar)
+      } finally {
+        await close(server)
+        await close(cdn)
+        if (directory) await fsp.rm(directory, { recursive: true, force: true })
+      }
+    })
+  }
+})
+
 /** 验证缺少 dbCryptoStorage 时仍能加密保存设置。 */
 test('兼容旧版 ZTools 设置存储', () => {
   const servicePath = require.resolve('../public/preload/services.js')

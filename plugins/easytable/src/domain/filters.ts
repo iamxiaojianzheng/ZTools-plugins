@@ -3,7 +3,7 @@
 
 import type { FieldDef, FilterCond, FilterOp } from '../types/table.ts'
 import { CREATED_AT_FIELD_ID, UPDATED_AT_FIELD_ID } from '../types/table.ts'
-import { displayValue } from './fieldTypes.ts'
+import { coerceFieldValue, displayValue } from './fieldTypes.ts'
 
 /** 系统列的虚拟字段定义（筛选/表单共用） */
 export function systemField(id: string): FieldDef {
@@ -28,6 +28,13 @@ export function opsForField(f: FieldDef): Array<{ op: FilterOp; label: string }>
       { op: 'thisMonth', label: '本月' }
     ]
   }
+  if (f.type === 'checkbox') {
+    // checkbox 的「否」和「未填」在表格里都显示为空，空值判定区分不出来，改用「是 / 否」
+    return [
+      { op: 'isTrue', label: '是' },
+      { op: 'isFalse', label: '否' }
+    ]
+  }
   const list: Array<{ op: FilterOp; label: string }> = [
     { op: 'empty', label: '为空' },
     { op: 'notEmpty', label: '不为空' }
@@ -50,9 +57,11 @@ export function opsForField(f: FieldDef): Array<{ op: FilterOp; label: string }>
   return list
 }
 
-/** 空值判定：null / '' / 空数组算空；checkbox 的 false 是有效值不算空 */
-export function isEmptyValue(f: FieldDef, v: unknown): boolean {
-  if (f.type === 'checkbox') return false
+/**
+ * 空值判定：null / '' / 空数组算空。
+ * checkbox 不走这里（改为「是 / 否」，见 opsForField），因为它的 false 和未填在表格里都显示为空。
+ */
+export function isEmptyValue(v: unknown): boolean {
   if (v == null) return true
   if (Array.isArray(v)) return v.length === 0
   return String(v) === ''
@@ -126,8 +135,14 @@ export function matchCond(
         : fields.find((x) => x.id === cond.fieldId)
   if (!f) return true // 字段已被删掉：条件失效但不拦人，避免「筛出 0 行还找不到原因」
 
+  // checkbox：按是否判断（「否」含未填的行，与表格里 false/未填都显示为空一致）
+  if (cond.op === 'isTrue' || cond.op === 'isFalse') {
+    const yes = coerceFieldValue(f, f.id in row.values ? row.values[f.id] : null) === true
+    return cond.op === 'isTrue' ? yes : !yes
+  }
+
   if (cond.op === 'empty' || cond.op === 'notEmpty') {
-    const empty = isEmptyValue(f, f.id in row.values ? row.values[f.id] : null)
+    const empty = isEmptyValue(f.id in row.values ? row.values[f.id] : null)
     // 系统时间列恒有值；date 字段走同一套空值判定
     return cond.op === 'empty' ? empty : !empty
   }

@@ -202,7 +202,8 @@ class RegistryClient {
 
     const tokenUrl = new URL(challenge.params.realm)
     if (challenge.params.service) tokenUrl.searchParams.set('service', challenge.params.service)
-    tokenUrl.searchParams.set('scope', challenge.params.scope || `repository:${repository}:pull`)
+    // Registry 根端点可能返回占位范围，令牌始终申请当前镜像的拉取权限。
+    tokenUrl.searchParams.set('scope', `repository:${repository}:pull`)
     const headers = this.username
       ? { Authorization: `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}` }
       : {}

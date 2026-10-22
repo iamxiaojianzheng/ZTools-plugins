@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FieldDef, FieldValue, FieldType, Row, TableSchema } from '../types/table'
-import { FIELD_TYPE_LABELS, FIELD_TYPE_OPTIONS, createField, collectFieldOptions } from '../domain/fieldTypes'
+import { FIELD_TYPE_LABELS, FIELD_TYPE_OPTIONS, createField, collectFieldOptions, coerceFieldValue } from '../domain/fieldTypes'
 import { DEFAULT_MULTI_SEP, VALUE_SPLIT_LABEL, splitMultiValue } from '../domain/separators'
 import { hasOptions } from '../types/table'
 
@@ -27,9 +27,10 @@ interface DraftField {
   name: string
   type: FieldType
   optionsText: string
-  /** 默认值编辑态：checkbox 用 'yes'/'no'/'none'，其余类型用文本输入 */
+  /** 默认值编辑态：checkbox 用 'yes'/'no'，其余类型用文本输入（空串表示未设置） */
   defaultText: string
-  isNew?: boolean
+  /** 上一次的类型，用于切换类型时迁移默认值（checkbox 的 yes/no 编码不能直接留给其他类型） */
+  lastType: FieldType
 }
 
 const draftName = ref('')
@@ -37,20 +38,22 @@ const fields = ref<DraftField[]>([])
 const showCreatedAt = ref(true)
 const showUpdatedAt = ref(true)
 
+/** 存储值 → 草稿默认值文本：checkbox 编码成 yes/no，多值用分隔符连接 */
+function defaultToText(type: FieldType, value: FieldValue | undefined): string {
+  if (value === undefined || value === null) return ''
+  if (type === 'checkbox') return value ? 'yes' : 'no'
+  if (Array.isArray(value)) return value.join(DEFAULT_MULTI_SEP)
+  return String(value)
+}
+
 function toDraft(f: FieldDef): DraftField {
-  const raw = f.default
-  let defaultText = ''
-  if (raw !== undefined) {
-    if (f.type === 'checkbox') defaultText = raw ? 'yes' : 'no'
-    else if (Array.isArray(raw)) defaultText = raw.join(DEFAULT_MULTI_SEP)
-    else if (raw != null) defaultText = String(raw)
-  }
   return {
     id: f.id,
     name: f.name,
     type: f.type,
     optionsText: hasOptions(f) ? f.options.join(DEFAULT_MULTI_SEP) : '',
-    defaultText
+    defaultText: defaultToText(f.type, f.default),
+    lastType: f.type
   }
 }
 
@@ -115,7 +118,7 @@ function addField() {
     type: 'text',
     optionsText: '',
     defaultText: '',
-    isNew: true
+    lastType: 'text'
   })
 }
 
@@ -134,10 +137,8 @@ function move(idx: number, delta: number) {
 const needOptions = computed(() =>
   fields.value.map((f) => f.type === 'select' || f.type === 'multi_select')
 )
-/** 该字段是否显示默认值输入（checkbox 用三态选择，其余用文本） */
-const showDefault = computed(() =>
-  fields.value.map((f) => f.type !== 'checkbox')
-)
+
+/** 是否字段用「是 / 否 / 无」三态选择，其余类型用文本输入 */
 const isCheckbox = computed(() => fields.value.map((f) => f.type === 'checkbox'))
 
 /** 用草稿的 id + 新类型构造字段定义，供「按新类型收集已有取值」使用 */
@@ -175,8 +176,25 @@ async function collectOptions(f: DraftField, ask: boolean): Promise<number> {
   return missing.length
 }
 
+/**
+ * 类型切换时把草稿里的默认值按新类型迁移，复用 coerceFieldValue 的转换语义，
+ * 保证「表设置里的默认值」和「已有数据按新类型转换后的值」一致。
+ * 主要解决 checkbox 的 yes/no 编码：直接留给文本等类型会变成字面量 'yes'/'no'。
+ */
+function migrateDefault(f: DraftField, from: FieldType) {
+  const value = parseDefault({ ...f, type: from })
+  f.defaultText = defaultToText(
+    f.type,
+    value === undefined ? undefined : coerceFieldValue(draftDef(f), value)
+  )
+}
+
 /** 切换到单选/多选：把已有数据里的不同取值收进选项，省得逐条手抄 */
 async function onTypeChange(f: DraftField) {
+  if (f.lastType !== f.type) {
+    migrateDefault(f, f.lastType)
+    f.lastType = f.type
+  }
   if (f.type !== 'select' && f.type !== 'multi_select') return
   await collectOptions(f, true)
 }
@@ -324,7 +342,7 @@ function defaultPlaceholder(type: FieldType): string {
             从已有数据收集
           </el-button>
         </div>
-        <div v-if="showDefault[idx]" class="default-row">
+        <div class="default-row">
           <span class="default-label">默认值</span>
           <el-select
             v-if="isCheckbox[idx]"

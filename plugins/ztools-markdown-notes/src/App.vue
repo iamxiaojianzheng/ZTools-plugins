@@ -5,10 +5,12 @@ import ImagePreview from './components/ImagePreview.vue'
 import MarkdownEditor from './components/MarkdownEditor.vue'
 import OutlinePanel from './components/OutlinePanel.vue'
 import TrashPanel from './components/TrashPanel.vue'
+import ThemeSettings from './components/ThemeSettings.vue'
 import WorkspaceTree from './components/WorkspaceTree.vue'
 import { extractOutline } from './outline'
+import { isDarkColor, resolveTheme, type ColorTheme } from './themes'
 import { endWorkspaceDrag, getWorkspaceDragPath } from './workspaceDrag'
-import { clearNoteDraft, clearNoteDraftPath, defaultEditorSettings, loadEditorMode, loadEditorSettings, loadGlobalNoteSearchEnabled, loadGlobalWorkspaceSearchEnabled, loadHiddenGlobalNotePaths, loadLastWorkspacePath, loadNoteDraft, loadPinnedNotePaths, loadRegisteredWorkspaces, loadTrashRetentionDays, normalizeHexColor, replaceNoteDraftPath, saveEditorMode, saveEditorSettings, saveGlobalNoteSearchEnabled, saveGlobalWorkspaceSearchEnabled, saveHiddenGlobalNotePaths, saveLastWorkspacePath, saveNoteDraft, savePinnedNotePaths, saveRegisteredWorkspaces, saveTrashRetentionDays, type NoteDraft, type RegisteredWorkspace } from './workspaceSession'
+import { clearNoteDraft, clearNoteDraftPath, defaultEditorSettings, loadEditorMode, loadEditorSettings, loadGlobalNoteSearchEnabled, loadGlobalWorkspaceSearchEnabled, loadHiddenGlobalNotePaths, loadLastWorkspacePath, loadNoteDraft, loadPinnedNotePaths, loadRegisteredWorkspaces, loadTrashRetentionDays, replaceNoteDraftPath, saveEditorMode, saveEditorSettings, saveGlobalNoteSearchEnabled, saveGlobalWorkspaceSearchEnabled, saveHiddenGlobalNotePaths, saveLastWorkspacePath, saveNoteDraft, savePinnedNotePaths, saveRegisteredWorkspaces, saveTrashRetentionDays, type EditorSettings, type NoteDraft, type RegisteredWorkspace } from './workspaceSession'
 
 const workspace = ref<WorkspaceScan | null>(null)
 const previousWorkspace = ref<WorkspaceScan | null>(null)
@@ -92,7 +94,46 @@ const hiddenGlobalNotePaths = ref<string[]>([])
 const isRootDropActive = ref(false)
 const isSettingsOpen = ref(false)
 const isResetSettingsOpen = ref(false)
-const editorSettings = ref({ ...defaultEditorSettings })
+const editorSettings = ref<EditorSettings>({ ...defaultEditorSettings, customThemes: [] })
+const themeSettingsPanel = ref<InstanceType<typeof ThemeSettings> | null>(null)
+const themePreview = ref<ColorTheme | null>(null)
+const systemDarkTheme = window.matchMedia('(prefers-color-scheme: dark)')
+const isSystemDark = ref(systemDarkTheme.matches)
+const activeTheme = computed(() => resolveTheme(editorSettings.value.themeId, editorSettings.value.customThemes, isSystemDark.value))
+const displayedTheme = computed(() => themePreview.value ?? activeTheme.value)
+const isDarkTheme = computed(() => isDarkColor(displayedTheme.value.colors.editorBackground))
+const themeCssVariables = computed(() => {
+  const colors = displayedTheme.value.colors
+  return {
+    '--navigation-background': colors.navigationBackground,
+    '--navigation-text': colors.navigationText,
+    '--navigation-color-scheme': isDarkColor(colors.navigationBackground) ? 'dark' : 'light',
+    '--editor-background': colors.editorBackground,
+    '--editor-text': colors.editorText,
+    '--editor-toolbar-background': colors.editorToolbarBackground,
+    '--popup-background': colors.popupBackground,
+    '--popup-text': colors.popupText,
+    '--popup-color-scheme': isDarkColor(colors.popupBackground) ? 'dark' : 'light',
+    '--accent-color': colors.accentColor,
+    '--accent-text': isDarkColor(colors.accentColor) ? '#FFFFFF' : '#172033',
+    '--theme-border-color': colors.borderColor,
+    '--find-highlight-color': colors.findHighlightColor,
+    '--find-highlight-text': isDarkColor(colors.findHighlightColor) ? '#FFFFFF' : '#172033',
+    '--text-highlight-color': colors.textHighlightColor,
+    '--text-highlight-opacity': `${editorSettings.value.textHighlightOpacity}%`,
+  }
+})
+
+function updateSystemTheme(event: MediaQueryListEvent) {
+  isSystemDark.value = event.matches
+}
+
+watch(themeCssVariables, (variables) => {
+  document.documentElement.dataset.backgroundTheme = displayedTheme.value.id
+  document.documentElement.dataset.customTheme = displayedTheme.value.id.startsWith('custom:') ? 'true' : 'false'
+  document.documentElement.dataset.colorScheme = isDarkTheme.value ? 'dark' : 'light'
+  Object.entries(variables).forEach(([name, value]) => document.documentElement.style.setProperty(name, value))
+}, { immediate: true, flush: 'sync' })
 const saveConflict = ref<{
   notePath: string
   diskContent: string
@@ -143,8 +184,6 @@ const workspaceChoices = computed<RegisteredWorkspace[]>(() => {
 const editorStyle = computed(() => ({
   '--editor-font-size': `${editorSettings.value.fontSize}px`,
   '--editor-line-height': String(editorSettings.value.lineHeight),
-  '--find-highlight-color': editorSettings.value.findHighlightColor,
-  '--text-highlight-color': editorSettings.value.textHighlightColor,
   '--text-highlight-opacity': `${editorSettings.value.textHighlightOpacity}%`,
 }))
 const pinnedNotes = computed(() => {
@@ -451,6 +490,8 @@ function showOperationSuccess(message: string) {
 }
 
 function closeTransientUi() {
+  themeSettingsPanel.value?.cancelPreview()
+  themePreview.value = null
   window.clearTimeout(operationTimer)
   operationMessage.value = ''
   pendingDelete.value = null
@@ -481,26 +522,41 @@ function closeTransientUi() {
 }
 
 function updateEditorSettings() {
-  saveEditorSettings(editorSettings.value)
+  persistEditorSettings(editorSettings.value)
 }
 
-function updateHighlightColor(setting: 'findHighlightColor' | 'textHighlightColor', event: Event) {
-  const input = event.target as HTMLInputElement
-  const color = normalizeHexColor(input.value)
-  if (!color) return
-  editorSettings.value[setting] = color
-  input.value = color
-  updateEditorSettings()
+function persistEditorSettings(settings: EditorSettings): boolean {
+  try {
+    saveEditorSettings(settings)
+    editorSettings.value = settings
+    return true
+  } catch (error) {
+    showOperationError(error instanceof Error ? error.message : '设置保存失败，请重试')
+    return false
+  }
 }
 
-function restoreHighlightColor(setting: 'findHighlightColor' | 'textHighlightColor', event: Event) {
-  const input = event.target as HTMLInputElement
-  input.value = editorSettings.value[setting]
+function selectTheme(themeId: string) {
+  persistEditorSettings({ ...editorSettings.value, themeId })
+}
+
+function saveCustomTheme(theme: ColorTheme) {
+  const customThemes = editorSettings.value.customThemes.filter((item) => item.id !== theme.id)
+  return persistEditorSettings({ ...editorSettings.value, themeId: theme.id, customThemes: [...customThemes, theme] })
+}
+
+function deleteCustomTheme(themeId: string) {
+  return persistEditorSettings({
+    ...editorSettings.value,
+    themeId: editorSettings.value.themeId === themeId ? 'blue' : editorSettings.value.themeId,
+    customThemes: editorSettings.value.customThemes.filter((item) => item.id !== themeId),
+  })
 }
 
 function resetDefaultSettings() {
-  editorSettings.value = { ...defaultEditorSettings }
-  saveEditorSettings(editorSettings.value)
+  themeSettingsPanel.value?.cancelPreview()
+  themePreview.value = null
+  if (!persistEditorSettings({ ...defaultEditorSettings, customThemes: editorSettings.value.customThemes })) return
   globalNoteSearchEnabled.value = false
   saveGlobalNoteSearchEnabled(false)
   globalWorkspaceSearchEnabled.value = false
@@ -659,6 +715,7 @@ function canDiscardChanges() {
 }
 
 onMounted(async () => {
+  systemDarkTheme.addEventListener('change', updateSystemTheme)
   window.addEventListener('keydown', handleShortcut, true)
   window.addEventListener('click', closeEntryMenu)
   if (!hasRuntime.value) {
@@ -698,7 +755,7 @@ onMounted(async () => {
 
   try {
     editorMode.value = loadEditorMode()
-    editorSettings.value = loadEditorSettings()
+    editorSettings.value = loadEditorSettings(isSystemDark.value)
     globalNoteSearchEnabled.value = loadGlobalNoteSearchEnabled()
     globalWorkspaceSearchEnabled.value = loadGlobalWorkspaceSearchEnabled()
     registeredWorkspaces.value = loadRegisteredWorkspaces()
@@ -738,6 +795,11 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  systemDarkTheme.removeEventListener('change', updateSystemTheme)
+  delete document.documentElement.dataset.backgroundTheme
+  delete document.documentElement.dataset.customTheme
+  delete document.documentElement.dataset.colorScheme
+  Object.keys(themeCssVariables.value).forEach((name) => document.documentElement.style.removeProperty(name))
   window.removeEventListener('keydown', handleShortcut, true)
   window.removeEventListener('click', closeEntryMenu)
   window.clearTimeout(operationTimer)
@@ -854,6 +916,7 @@ function cancelCreate() {
 }
 
 function handleShortcut(event: KeyboardEvent) {
+  if (themeSettingsPanel.value?.handleShortcut(event)) return
   const eventTarget = event.target instanceof HTMLElement ? event.target : null
   const isEditing = Boolean(eventTarget?.closest('input, textarea, [contenteditable="true"]'))
   if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f' && activeNotePath.value) {
@@ -2092,6 +2155,7 @@ watch(activeNotePath, () => {
             ref="markdownEditor"
             v-model="editorContent"
             :mode="editorMode"
+            :dark-theme="isDarkTheme"
             :disabled="isReadingNote"
             :workspace-path="workspace.workspace.path"
             :note-path="activeNotePath"
@@ -2258,12 +2322,20 @@ watch(activeNotePath, () => {
             </div>
           </section>
           <section class="settings-group">
-            <header class="settings-group-title"><h3>编辑器</h3><small>调整正文显示、文本高亮和当前笔记查找效果。</small></header>
+            <header class="settings-group-title"><h3>外观与编辑器</h3><small>颜色随主题保存；字号、行高和高亮透明度切换主题时保持不变。</small></header>
+            <ThemeSettings
+              ref="themeSettingsPanel"
+              :active-theme="activeTheme"
+              :custom-themes="editorSettings.customThemes"
+              :system-dark="isSystemDark"
+              @select="selectTheme"
+              :save-theme="saveCustomTheme"
+              :delete-theme="deleteCustomTheme"
+              @preview="themePreview = $event"
+            />
             <label>正文字号 <input v-model.number="editorSettings.fontSize" type="range" min="12" max="24" step="1" @input="updateEditorSettings" /><span>{{ editorSettings.fontSize }} px</span></label>
             <label>正文行高 <input v-model.number="editorSettings.lineHeight" type="range" min="1.2" max="2.4" step="0.1" @input="updateEditorSettings" /><span>{{ editorSettings.lineHeight.toFixed(1) }}</span></label>
-            <label>文本高亮颜色 <span class="color-setting-control"><input v-model="editorSettings.textHighlightColor" type="color" @input="updateHighlightColor('textHighlightColor', $event)" /><input :value="editorSettings.textHighlightColor" type="text" size="8" maxlength="7" inputmode="text" aria-label="文本高亮颜色，支持十六进制" title="支持 #RRGGBB 或 RRGGBB" @input="updateHighlightColor('textHighlightColor', $event)" @change="restoreHighlightColor('textHighlightColor', $event)" /></span></label>
             <label>文本高亮透明度 <input v-model.number="editorSettings.textHighlightOpacity" type="range" min="0" max="100" step="1" @input="updateEditorSettings" /><span>{{ editorSettings.textHighlightOpacity }}%</span></label>
-            <label>查找匹配颜色 <span class="color-setting-control"><input v-model="editorSettings.findHighlightColor" type="color" @input="updateHighlightColor('findHighlightColor', $event)" /><input :value="editorSettings.findHighlightColor" type="text" size="8" maxlength="7" inputmode="text" aria-label="查找匹配颜色，支持十六进制" title="支持 #RRGGBB 或 RRGGBB" @input="updateHighlightColor('findHighlightColor', $event)" @change="restoreHighlightColor('findHighlightColor', $event)" /></span></label>
           </section>
           <section class="settings-group">
             <header class="settings-group-title"><h3>zTools 集成</h3><small>控制哪些内容可以从 zTools 主搜索中直接打开。</small></header>
@@ -2298,7 +2370,7 @@ watch(activeNotePath, () => {
       <div v-if="isResetSettingsOpen" class="modal-backdrop" @click.self="isResetSettingsOpen = false">
         <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-settings-title">
           <h2 id="reset-settings-title">恢复默认设置？</h2>
-          <p>将重置编辑器显示、zTools 全局搜索开关和回收站保留时间。工作区、笔记、置顶和单篇隐藏状态不会改变。</p>
+          <p>将切回蓝底并重置字号、行高、高亮透明度、zTools 全局搜索开关和回收站保留时间。自定义主题、工作区、笔记、置顶和单篇隐藏状态不会改变。</p>
           <div class="confirm-actions">
             <button type="button" class="button-secondary" @click="isResetSettingsOpen = false">取消</button>
             <button type="button" @click="resetDefaultSettings">确认恢复</button>

@@ -289,6 +289,21 @@ function makeBallDom() {
   const saved2 = dbMap.get('sb.ballPos');
   ok(saved2 && saved2.x === 640 && saved2.y === 420, '第二次拖动终点持久化（640,420）', saved2);
 
+  console.log('== 6. 连续快拖：上一轮异步快照不能覆盖下一轮 ==');
+  for (const [id, dx] of [[3, 20], [4, 30]]) {
+    ballEl.fire('pointerdown', { button: 0, screenX: 100, screenY: 100, pointerId: id });
+    ballEl.fire('pointermove', { screenX: 100 + dx, screenY: 100, pointerId: id });
+    ballEl.fire('pointerup', { button: 0, screenX: 100 + dx, screenY: 100, pointerId: id });
+    await sleep(25);
+  }
+  await sleep(250);
+  const rapidPos = dbMap.get('sb.ballPos');
+  ok(rapidPos && rapidPos.x === 690 && rapidPos.y === 420, '两次快拖累计位移 +50，迟到的 getBounds 不回跳', rapidPos);
+  // 模拟旧手势的迟到帧，不能再推动窗口。
+  ballCtx.win.services.host.drag('move', 500, 500, null, 'expired-gesture');
+  await sleep(25);
+  ok(curBounds.x === 690 && curBounds.y === 420, '丢弃其他拖动手势的迟到位移', curBounds);
+
   console.log('');
   if (fail === 0) {
     console.log('✓ 悬浮球拖动回归测试全部通过（' + pass + ' 项）');

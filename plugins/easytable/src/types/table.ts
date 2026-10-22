@@ -38,6 +38,8 @@ export interface TableSchema {
   showCreatedAt?: boolean
   /** 显示系统列「修改时间」（默认显示） */
   showUpdatedAt?: boolean
+  /** 手动拖动后记下的列宽（列 id → px）；没记的列按内容自适应 */
+  columnWidths?: Record<string, number>
 }
 
 export const CREATED_AT_FIELD_ID = '__createdAt'
@@ -60,6 +62,8 @@ export type FilterOp =
   | 'notEmpty'
   | 'eq'
   | 'contains'
+  | 'isTrue'
+  | 'isFalse'
   | 'today'
   | 'thisWeek'
   | 'thisMonth'

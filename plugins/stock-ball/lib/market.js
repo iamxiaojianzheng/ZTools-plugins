@@ -68,7 +68,7 @@ function toSecid(input) {
   let market = m ? m[1].toLowerCase() : '';
   const code = digits(m ? m[2] : s);
   if (!/^\d{6}$/.test(code)) return '';
-  if (!market) market = /^[659]/.test(code) ? 'sh' : 'sz';
+  if (!market) market = /^920/.test(code) ? 'sz' : (/^[659]/.test(code) ? 'sh' : 'sz');
   if (market === 'bj') market = 'sz';
   return (market === 'sh' ? '1.' : '0.') + code;
 }
@@ -147,32 +147,77 @@ async function indexes(opts) {
   return qs.map((q, i) => Object.assign({}, q, { name: (INDEX_LIST[i] && INDEX_LIST[i].name) || q.name }));
 }
 
-/** 分时（当日逐分钟）：{ code, secid, prevClose, items:[{time,price,avg,volume,amount}] } */
+/** 兜底：腾讯分时（minute/query）。行格式 "HHMM 价格 累计量(手) 累计额(元)"，
+    均价 = 累计额 / (累计量×100)，昨收取 qt[4]，东财 trends2 挂了时用 */
+async function trendTencent(input, opts) {
+  const secid = toSecid(input);
+  if (!secid) throw new Error('代码无效: ' + input);
+  const c = fromSecid(secid);
+  const txCode = c.market + c.code;
+  const url = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=' + txCode;
+  const json = await httpGetJSON(url, { headers: { Referer: 'https://gu.qq.com/' }, proxy: proxyOf(opts), timeout: 8000 });
+  const node = json && json.data && json.data[txCode];
+  const lines = (node && node.data && node.data.data) || [];
+  const qtArr = (node && node.qt && node.qt[txCode]) || [];
+  const prevClose = num(qtArr[4]);
+  const items = [];
+  let lastVol = 0;
+  let lastAmt = 0;
+  for (const line of lines) {
+    const p = String(line).trim().split(/\s+/);
+    if (p.length < 3) continue;
+    const raw = p[0];
+    const time = /^\d{4}$/.test(raw) ? raw.slice(0, 2) + ':' + raw.slice(2) : raw;
+    const price = num(p[1]);
+    const cumVol = num(p[2]) || 0;
+    const cumAmt = p.length >= 4 ? num(p[3]) : null;
+    const dv = Math.max(0, cumVol - lastVol);
+    const dvAmt = (cumAmt != null) ? Math.max(0, cumAmt - lastAmt) : null;
+    lastVol = cumVol;
+    if (cumAmt != null) lastAmt = cumAmt;
+    items.push({
+      time,
+      price,
+      avg: (cumAmt != null && cumVol > 0) ? cumAmt / (cumVol * 100) : null,
+      volume: dv,
+      amount: dvAmt
+    });
+  }
+  return { code: c.code, secid, name: qtArr[1] || c.code, prevClose, items, source: 'tencent' };
+}
+
+/** 分时（当日逐分钟）：{ code, secid, prevClose, items:[{time,price,avg,volume,amount}] }
+    主通道东财 trends2，挂了自动切腾讯分钟数据 */
 async function trend(input, opts) {
   const secid = toSecid(input);
   if (!secid) throw new Error('代码无效: ' + input);
   const qs = 'api/qt/stock/trends2/get?secid=' + secid +
     '&fields1=f1,f2,f3,f4,f5,f6,f7,f8&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ut=' + UT +
     '&np=1&fltt=2&invt=2&ndays=1&iscr=0&iscca=0';
-  const json = await cached('t:' + secid, 3000, () => emJson(qs, opts));
-  const data = (json && json.data) || {};
-  const items = [];
-  for (const line of data.trends || []) {
-    const p = String(line).split(',');
-    if (p.length < 6) continue;
-    let t = p[0] || '';
-    const sp = t.indexOf(' ');
-    if (sp > 0) t = t.slice(sp + 1);
-    if (t >= '09:15' && t <= '09:25' && Number(p[5]) === 0) continue;
-    items.push({ time: t, price: num(p[2]), avg: num(p[7]), volume: num(p[5]), amount: num(p[6]) });
+  try {
+    const json = await cached('t:' + secid, 3000, () => emJson(qs, opts));
+    const data = (json && json.data) || {};
+    const items = [];
+    for (const line of data.trends || []) {
+      const p = String(line).split(',');
+      if (p.length < 6) continue;
+      let t = p[0] || '';
+      const sp = t.indexOf(' ');
+      if (sp > 0) t = t.slice(sp + 1);
+      if (t >= '09:15' && t <= '09:25' && Number(p[5]) === 0) continue;
+      items.push({ time: t, price: num(p[2]), avg: num(p[7]), volume: num(p[5]), amount: num(p[6]) });
+    }
+    return {
+      code: digits(data.code || fromSecid(secid).code),
+      secid,
+      name: data.name || '',
+      prevClose: num(data.prePrice || data.preClose),
+      items
+    };
+  } catch (e) {
+    // 东财分时挂了（push2 经常抽风）→ 腾讯分钟数据兜底，独立短缓存
+    return cached('tt:' + secid, 3000, () => trendTencent(input, opts));
   }
-  return {
-    code: digits(data.code || fromSecid(secid).code),
-    secid,
-    name: data.name || '',
-    prevClose: num(data.prePrice || data.preClose),
-    items
-  };
 }
 
 /** 个股详情（快照）：涨跌/开高低/量额/换手/量比/市盈率/市净率/流通市值 */
@@ -332,10 +377,10 @@ function marketStatus(now) {
   const day = d.getDay();
   const hhmm = d.getHours() * 100 + d.getMinutes();
   if (day === 0 || day === 6) return { open: false, label: '休市' };
-  if (hhmm >= 930 && hhmm <= 1130) return { open: true, label: '交易中' };
+  if (hhmm >= 910 && hhmm <= 1130) return { open: true, label: '交易中' };
   if (hhmm > 1130 && hhmm < 1300) return { open: false, label: '午间休市' };
   if (hhmm >= 1300 && hhmm <= 1500) return { open: true, label: '交易中' };
-  if (hhmm < 930) return { open: false, label: '未开盘' };
+  if (hhmm < 910) return { open: false, label: '未开盘' };
   return { open: false, label: '已收盘' };
 }
 

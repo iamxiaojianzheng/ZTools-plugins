@@ -5,7 +5,7 @@
   "homepage": "https://github.com/z-hanzhe/ztools-did-tool",
   "description": "无需安装 Docker，直接从镜像仓库下载并导出可由 docker load 导入的 tar 镜像包",
   "author": "hanzhe",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.html",
   "preload": "preload/services.js",
   "logo": "logo.png",

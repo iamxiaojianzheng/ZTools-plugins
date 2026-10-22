@@ -1,5 +1,5 @@
 import { computed, reactive, ref, watch } from 'vue'
-import { api, favoritesStore, prefsStore, isDevMock, contentId, toImgSrc } from '../api'
+import { api, favoritesStore, prefsStore, contentId, toImgSrc } from '../api'
 import type { Category, ClipboardRecord, FavoriteSnapshot, ItemKind } from '../types'
 import { IMG_SCALES, IMG_SCALE_ORDER, type ImgScale } from '../utils/layout'
 import { webUrlOf } from '../utils/format'
@@ -237,6 +237,70 @@ async function loadMore(): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/* 实时性：宿主推送 + 运行期轮询兜底                                    */
+/* ------------------------------------------------------------------ */
+
+/** 运行期间的轮询间隔（毫秒） */
+export const POLL_INTERVAL_MS = 1200
+
+/** 每次"探新"拉多少条最新的历史（够覆盖一次连续复制） */
+const HEAD_SIZE = 5
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * 把宿主库里最新的一批记录并入列表。
+ *
+ * 只补"本地没有的"，并且是 prepend —— 新复制的一定在最前面。
+ * 返回确实新增了几条（0 表示没变化），调用方据此决定是否要更新计数。
+ */
+async function syncLatest(): Promise<number> {
+  try {
+    const res = await api.getHistory(1, HEAD_SIZE)
+    const seen = new Set(records.value.map((r) => r.id))
+    const fresh = res.items.filter((r) => !seen.has(r.id))
+    if (fresh.length === 0) return 0
+    records.value = fresh.concat(records.value)
+    // 头部插入会把所有行往下推，选中下标要跟着挪，
+    // 否则用户盯着的那条会在回车复制时变成别人（下标是位置，不是记录）
+    if (selectedIndex.value > 0) selectedIndex.value += fresh.length
+    // 总数也要跟上：看着列表变长了、侧栏计数却不动，一样是"没实时更新"
+    if (res.total) totalCount.value = res.total
+    else totalCount.value += fresh.length
+    recount()
+    return fresh.length
+  } catch {
+    /* 宿主忙/窗口正在关闭：这一拍不算事，下一拍还会再来 */
+    return 0
+  }
+}
+
+/** 用一次轻量查询判断"库里是不是多了东西" */
+async function hasNewRecords(): Promise<boolean> {
+  const n = await api.clipboardCount()
+  if (n === null) return true // 老宿主没有 getStatus：不看也查，反正只是多一次 IPC
+  if (n === totalCount.value) return false
+  totalCount.value = n
+  return true
+}
+
+function startWatching(): void {
+  stopWatching()
+  // 进来先看一眼：打开插件之前复制的内容，推出来就该在最新的位置上
+  void syncLatest()
+  pollTimer = setInterval(() => {
+    void hasNewRecords().then((yes) => {
+      if (yes) void syncLatest()
+    })
+  }, POLL_INTERVAL_MS)
+}
+
+function stopWatching(): void {
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = null
+}
+
+/* ------------------------------------------------------------------ */
 /* 搜索：本地即时过滤 + 远端防抖补充                                   */
 /* ------------------------------------------------------------------ */
 
@@ -382,21 +446,34 @@ async function openLink(r: ClipboardRecord): Promise<void> {
   }
 }
 
+/**
+ * 删除一条记录。
+ *
+ * **以界面为准（乐观删除）**：不再因为宿主接口返回失败就弹"删除失败"、
+ * 然后什么都不做 —— 用户点的是界面上的记录，点了就该消失。
+ *
+ * 最典型的失败场景就是"收藏"分类：那里的记录是**本插件自己的快照**，
+ * id 是内容 key，宿主历史库里压根没有这条 id，delete 必然失败；
+ * 拿它的返回值卡住界面，等于让"删除"按钮在收藏里完全失效。
+ * 宿主那边万一真没删掉，下次打开还在，再删一次即可（失败只在控制台留痕）。
+ */
 async function deleteRecord(r: ClipboardRecord): Promise<void> {
   const idx = filtered.value.findIndex((x) => x.id === r.id)
-  const ok = await api.remove(r.id)
-  if (!ok) {
-    api.toast('删除失败')
-    return
-  }
   if (activeCat.value === 'star') {
+    // 收藏快照由本插件持久化，没有宿主记录可删：改本地即可
     favorites.value = favorites.value.filter((f) => f.id !== r.id)
     favoritesStore.save(favorites.value)
     recount()
   } else {
     records.value = records.value.filter((x) => x.id !== r.id)
+    // 远端搜索结果里可能存着同一条（source 按 id 去重，只删一边它会"复活"）
+    remoteResults.value = remoteResults.value.filter((x) => x.id !== r.id)
     if (totalCount.value > 0) totalCount.value -= 1
     recount()
+    // 通知宿主删除，但不拿它的返回值拦界面
+    void api.remove(r.id).catch((e: unknown) => {
+      console.warn('[y-clipboard] 宿主侧删除未成功（界面已移除）：', e)
+    })
   }
   if (idx >= 0 && idx < filtered.value.length) {
     selectedIndex.value = Math.min(idx, filtered.value.length - 1)
@@ -425,17 +502,23 @@ function toggleStar(r: ClipboardRecord): void {
   recount()
 }
 
+/**
+ * 清空历史。同样是"以界面为准"：宿主 clear 返回 0（老版本不返回 count）
+ * 也照样清空列表 —— 弹了清空却什么都没变，比不弹更让人困惑。
+ * 提示里的条数用界面上真实存在的条数，不用宿主的返回值。
+ */
 async function clearAll(): Promise<void> {
-  const n = await api.clear()
-  if (n > 0 || isDevMock()) {
-    records.value = []
-    page.value = 0
-    hasMore.value = false
-    totalCount.value = 0
-    scannedCats.clear()
-    recount()
-    api.toast(`已清空 ${n} 条记录`)
-  }
+  const n = records.value.length
+  void api.clear().catch((e: unknown) => {
+    console.warn('[y-clipboard] 宿主侧清空未成功（界面已清空）：', e)
+  })
+  records.value = []
+  page.value = 0
+  hasMore.value = false
+  totalCount.value = 0
+  scannedCats.clear()
+  recount()
+  api.toast(n > 0 ? `已清空 ${n} 条记录` : '已清空')
 }
 
 function setCat(cat: Category): void {
@@ -497,31 +580,27 @@ function init(): void {
   subInputReady.value = api.setSubInput(setQuery, '搜索剪贴板历史')
 
   // 每次打开插件都把焦点抢回搜索框（挂载时那次会被宿主的 view.focus() 抢走）
-  api.onPluginEnter(() => focusSearch())
-  // 退出插件时取消尚未执行的重试
-  api.onPluginOut(() => cancelFocus())
+  api.onPluginEnter(() => {
+    focusSearch()
+    // 运行期开始"盯着"宿主：推送不保证到，见下面 startWatching 的说明
+    startWatching()
+  })
+  // 退出插件时取消尚未执行的重试，并停止轮询
+  api.onPluginOut(() => {
+    cancelFocus()
+    stopWatching()
+  })
 
-  api.onChange(async (payload?: unknown) => {
-    // 变化项结构未知：能归一化就 prepend，否则保守重载第一页
-    const maybe = Array.isArray(payload) ? payload[0] : payload
-    if (maybe && typeof maybe === 'object') {
-      try {
-        const res = await api.getHistory(1, 5)
-        const seen = new Set(records.value.map((r) => r.id))
-        const fresh = res.items.filter((r) => !seen.has(r.id))
-        if (fresh.length) {
-          records.value = fresh.concat(records.value)
-          recount()
-          return
-        }
-        if (res.items.length) {
-          records.value = res.items
-          recount()
-          return
-        }
-      } catch { /* fallthrough */ }
-    }
-    void loadFirst()
+  /**
+   * 宿主推送（`clipboard.onChange` → 主进程 `sendPluginMessage('clipboard-change')`）。
+   * 它只发给 `pluginManager.pluginView`（当前那个视图），实际并不总能收到 ——
+   * 表现就是"插件开着，新复制的内容不出现，退出再进就好了"。
+   * 所以这里只当它是**加速器**：收到就立刻同步一次，收不到另有下面的轮询兜底。
+   */
+  api.onChange(() => {
+    void hasNewRecords().then((yes) => {
+      if (yes) void syncLatest()
+    })
   })
 
   void loadFirst()
@@ -535,7 +614,8 @@ export function useStore() {
     imgScale, imgScaleLabel, cycleImgScale,
     init, loadFirst, loadMore, setQuery, setCat,
     copyRecord, deleteRecord, toggleStar, clearAll, moveSelection,
-    revealFile, openLink, favKey
+    revealFile, openLink, favKey,
+    syncLatest, stopWatching
   }
 }
 

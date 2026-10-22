@@ -1,4 +1,4 @@
-import type { FieldDef, FieldValue, FieldType } from '../types/table.ts'
+import type { FieldDef, FieldValue, FieldType, Row } from '../types/table.ts'
 import { hasOptions } from '../types/table.ts'
 import { DEFAULT_MULTI_SEP, splitMultiValue } from './separators.ts'
 
@@ -220,6 +220,30 @@ export function coerceRowsToFields<T extends { values: Record<string, FieldValue
     if (!values) return row
     changedRows += 1
     return { ...row, values }
+  })
+  return changedRows ? { rows: next, changedRows } : null
+}
+
+/**
+ * 批量修改：把指定行的某个字段统一改成同一个值。
+ * targetIds 给定时只处理这些行，否则处理全部（未勾选视为全部）。
+ * 只改真正变化的行，并刷新它们的 updatedAt——这是内容修改，不同于
+ * coerceRowsToFields 的结构调整；全部无变化返回 null，避免「修改时间」被无谓刷新。
+ */
+export function batchSetFieldValue(
+  rows: Row[],
+  fieldId: string,
+  value: FieldValue,
+  targetIds?: ReadonlySet<string>
+): { rows: Row[]; changedRows: number } | null {
+  if (targetIds && !targetIds.size) return null
+  const now = Date.now()
+  let changedRows = 0
+  const next = rows.map((row) => {
+    if (targetIds && !targetIds.has(row.id)) return row
+    if (sameFieldValue(row.values[fieldId], value)) return row
+    changedRows += 1
+    return { ...row, values: { ...row.values, [fieldId]: value }, updatedAt: now }
   })
   return changedRows ? { rows: next, changedRows } : null
 }

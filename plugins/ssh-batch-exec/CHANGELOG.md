@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 - 2026-10-17
+
+- 修复 macOS 市场安装版启动后「测试连接」报错、执行永远卡在连接中的问题：根因为构建产物缺失 preload 的 Node 依赖（node_modules/ssh2 未被包含进插件包），导致 preload.js 加载即抛 Cannot find module、window.services 未挂载
+- 修复 .gitignore 规则：原 `node_modules/` 误排除所有子目录依赖，改为仅排除项目根目录，确保 public/node_modules 与 dist/node_modules 随仓库提交并进入发布包
+- 构建时向 dist 写入的 plugin.json 移除 development 覆盖，避免开发模式安装时强制加载 localhost:5173 导致白屏
+
 ## 1.0.0 - 2026-09-11
 
 - 首个正式版本，基于 ZTools 插件平台 + Vue 3 + Vite + ssh2 实现一键批量执行服务器命令

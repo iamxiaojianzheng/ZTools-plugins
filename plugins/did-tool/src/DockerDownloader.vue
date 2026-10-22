@@ -38,7 +38,8 @@ const form = reactive({
 const inspection = ref<DockerInspection | null>(null)
 const task = ref<DownloadTask | null>(null)
 const inspectError = ref('')
-const inspecting = ref(false)
+const inspectionAction = ref<'image' | 'platform' | null>(null)
+const inspecting = computed(() => inspectionAction.value !== null)
 const copied = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let polling = false
@@ -62,6 +63,7 @@ const canStart = computed(
     !!inspection.value &&
     !!selectedSource.value &&
     !!settings.value.downloadPath &&
+    !inspecting.value &&
     !taskRunning.value
 )
 const downloadPercent = computed(() => {
@@ -120,11 +122,11 @@ function requestOptions(): DockerRequestOptions {
   }
 }
 
-/** 读取远端镜像清单。 */
-async function inspectImage(): Promise<void> {
+/** 根据操作类型读取镜像清单，并将加载状态显示在对应按钮上。 */
+async function inspectImage(action: 'image' | 'platform' = 'image'): Promise<void> {
   if (!canInspect.value) return
   inspectError.value = ''
-  inspecting.value = true
+  inspectionAction.value = action
   const generation = ++inspectionGeneration
   try {
     const result = await window.services.inspectImage(requestOptions())
@@ -136,16 +138,16 @@ async function inspectImage(): Promise<void> {
     inspection.value = null
     inspectError.value = errorMessage(error)
   } finally {
-    inspecting.value = false
+    inspectionAction.value = null
   }
 }
 
 /** 切换目标架构并重新读取对应清单。 */
 async function selectPlatform(event: Event): Promise<void> {
   const platform = (event.target as HTMLSelectElement).value
-  if (!platform || platform === form.platform || inspecting.value) return
+  if (!platform || platform === form.platform || !canInspect.value) return
   form.platform = platform
-  await inspectImage()
+  await inspectImage('platform')
 }
 
 /** 切换首页当前使用的镜像源。 */
@@ -387,7 +389,7 @@ onBeforeUnmount(stopPolling)
           </button>
         </div>
 
-        <form class="config-form" @submit.prevent="inspectImage">
+        <form class="config-form" @submit.prevent="inspectImage()">
           <div class="field">
             <label for="image-source">镜像地址</label>
             <div class="select-wrap leading-icon">
@@ -422,10 +424,10 @@ onBeforeUnmount(stopPolling)
             </div>
           </div>
 
-          <button class="inspect-button" type="submit" :disabled="!canInspect">
-            <LoaderCircle v-if="inspecting" :size="17" class="spin" />
+          <button class="inspect-button" type="submit" :disabled="!canInspect" :aria-busy="inspectionAction === 'image'">
+            <LoaderCircle v-if="inspectionAction === 'image'" :size="17" class="spin" />
             <Search v-else :size="17" />
-            {{ inspecting ? '解析中' : '解析镜像' }}
+            {{ inspectionAction === 'image' ? '解析中' : '解析镜像' }}
           </button>
         </form>
 
@@ -481,9 +483,16 @@ onBeforeUnmount(stopPolling)
             <AlertTriangle :size="15" />
             该镜像可能已下载，点击检查
           </button>
-          <button class="primary-button" type="button" :disabled="!canStart" @click="startDownload">
-            <HardDriveDownload :size="18" />
-            开始下载
+          <button
+            class="primary-button"
+            type="button"
+            :disabled="!canStart"
+            :aria-busy="inspectionAction === 'platform'"
+            @click="startDownload"
+          >
+            <LoaderCircle v-if="inspectionAction === 'platform'" :size="18" class="spin" />
+            <HardDriveDownload v-else :size="18" />
+            {{ inspectionAction === 'platform' ? '切换架构中' : '开始下载' }}
           </button>
         </div>
       </section>

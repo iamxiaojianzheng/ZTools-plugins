@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { Reminder, ReminderFormData, ReminderType } from '../../types/reminder'
 import { REMINDER_TYPE_LABELS, DAY_FILTER_LABELS, createEmptyReminder } from '../../types/reminder'
@@ -31,6 +31,21 @@ const TYPE_DESCRIPTIONS: Record<ReminderType, string> = {
   once: '在指定的日期和时刻只提醒一次，触发后自动停用'
 }
 
+// once 编辑时的初始日期/时间：按本地时区取（toISOString 是 UTC，会把凌晨的提醒错算到前一天）
+const onceInitialDate = computed(() => {
+  const ts = props.editReminder?.triggerAt
+  if (!ts) return undefined
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})
+
+const onceInitialTime = computed(() => {
+  const ts = props.editReminder?.triggerAt
+  if (!ts) return undefined
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+})
+
 function loadFromReminder(r: Reminder) {
   form.value = {
     title: r.title,
@@ -39,7 +54,6 @@ function loadFromReminder(r: Reminder) {
     schedules: (r.schedules || []).map(s => ({ ...s })),
     interval: r.interval,
     align: r.align === 'start' ? 'start' : 'create',
-    triggerAt: r.triggerAt,
     weekdays: r.weekdays ? [...r.weekdays] : [],
     triggerTime: r.triggerTime || '09:00',
     dayFilter: r.dayFilter || 'all'
@@ -141,8 +155,8 @@ function handleSubmit() {
       <OnceForm
         v-if="form.type === 'once'"
         ref="onceFormRef"
-        :initial-date="editReminder?.triggerAt ? new Date(editReminder.triggerAt).toISOString().slice(0, 10) : undefined"
-        :initial-time="editReminder?.triggerAt ? `${String(new Date(editReminder.triggerAt).getHours()).padStart(2, '0')}:${String(new Date(editReminder.triggerAt).getMinutes()).padStart(2, '0')}` : undefined"
+        :initial-date="onceInitialDate"
+        :initial-time="onceInitialTime"
       />
 
       <!-- ===== daily：每日提醒 ===== -->

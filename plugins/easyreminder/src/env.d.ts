@@ -19,6 +19,7 @@ interface ReminderLike {
   triggerTime?: string
   enabled: boolean
   lastTriggered: number
+  lastFiredSlot?: number
   createdAt: number
 }
 
@@ -31,12 +32,6 @@ interface LogEntryLike {
 
 // Preload services 类型声明（对应 public/preload/services.js）
 interface Services {
-  readFile: (file: string) => string
-  writeTextFile: (text: string) => string
-  writeImageFile: (base64Url: string) => string | undefined
-  notify: (title: string, body: string) => void
-  sendNotification: (title: string, body: string) => void
-
   getReminders: () => ReminderLike[]
   addReminder: (formData: Record<string, any>) => ReminderLike
   updateReminder: (id: string, formData: Record<string, any>) => boolean
@@ -44,13 +39,12 @@ interface Services {
   toggleReminder: (id: string) => boolean
 
   refreshScheduler: () => void
-  stopScheduler: () => void
+  getSchedulerState: () => { ready: boolean; nextTriggerText: string }
 
   getHolidayStatus: () => { years: number[]; updatedAt: number; refreshing: boolean }
   refreshHolidayData: () => Promise<boolean>
 
   getLogs: () => LogEntryLike[]
-  addLog: (message: string, detail: Record<string, any>) => void
   clearLogs: () => void
 }
 

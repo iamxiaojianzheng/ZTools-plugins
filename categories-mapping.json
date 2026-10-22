@@ -105,6 +105,7 @@
       "clipboard-image-paintbrush",
       "colors",
       "doutu",
+      "extract-audio",
       "ibox-wallpaper",
       "imgbatch",
       "long-screenshot",
@@ -114,7 +115,8 @@
       "shortcut-capture",
       "splayer-z",
       "tinypng",
-      "video-parse"
+      "video-parse",
+      "video-enhancer"
     ]
   },
   {

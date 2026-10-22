@@ -114,7 +114,7 @@ declare global {
   }
 
   interface AppSettings {
-    version: 4
+    version: 5
     sources: ImageSourceSetting[]
     selectedSourceId: string
     proxy: ProxySetting

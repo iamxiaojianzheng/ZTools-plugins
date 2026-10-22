@@ -383,6 +383,25 @@ export const host = {
     return Number((res as any)?.count ?? 0)
   },
 
+  /**
+   * 宿主剪贴板库里的记录总数（`clipboard.getStatus()` → `itemCount`）。
+   *
+   * 用来"探头"：数量变了才值得去拉一次历史。比每次都 getHistory 便宜得多
+   * （历史是全量取出的 IPC，序列号化才是成本）。
+   * 宿主没有这个接口时返回 null，调用方退化为定时拉头部。
+   */
+  async clipboardCount(): Promise<number | null> {
+    const zt = window.ztools as any
+    if (typeof zt?.clipboard?.getStatus !== 'function') return null
+    try {
+      const s = await zt.clipboard.getStatus()
+      const n = Number(s?.itemCount)
+      return Number.isFinite(n) ? n : null
+    } catch {
+      return null
+    }
+  },
+
   onChange(cb: () => void): void {
     ;(window.ztools as any).clipboard.onChange(cb)
   },
@@ -767,6 +786,25 @@ const mock = {
     return n
   },
 
+  async clipboardCount(): Promise<number | null> {
+    return mockDb.length
+  },
+
+  /**
+   * 开发模式专用：往模拟库里塞一条新记录，等价于"用户在别处复制了一段内容"。
+   * 浏览器里没有宿主推送可验证，实时更新（轮询兜底）这条链路只能靠它测。
+   * 探针用法：`window.__mockCopy('刚复制的内容')` 然后看列表头部。
+   */
+  copyFake(text: string): void {
+    mockDb.unshift({
+      id: 'fake-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      type: 'text',
+      content: text,
+      timestamp: Date.now()
+    })
+  },
+
+  /** 开发模式没有宿主推送（浏览器里也没有剪贴板监听），由 store 侧的轮询兜底 */
   onChange(_cb: () => void): void {
     /* 开发模式不监听 */
   },
@@ -838,6 +876,11 @@ function sleep(ms: number): Promise<void> {
 
 /** 统一出口：真实宿主或 mock */
 export const api = isHost() ? host : mock
+
+// 开发模式把"模拟复制"挂到 window 上，探针用它验证实时更新链路（见 mock.copyFake）
+if (!isHost() && typeof window !== 'undefined') {
+  ;(window as unknown as Record<string, unknown>).__mockCopy = (t: string) => mock.copyFake(t)
+}
 
 /* ------------------------------------------------------------------ */
 /* 收藏持久化（宿主 dbStorage / mock localStorage）                     */

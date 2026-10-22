@@ -1,7 +1,7 @@
 {
   "name": "easytable",
-  "version": "1.0.3",
-  "description": "自定义字段的简单记录表：文本/标签/单选等，一键复制到 Excel，支持 CSV/JSON 导入导出",
+  "version": "1.0.6",
+  "description": "自定义字段的简单记录表：文本/标签/单选等，支持批量修改，一键复制到 Excel，支持 CSV/JSON 导入导出",
   "type": "module",
   "scripts": {
     "dev": "vite",

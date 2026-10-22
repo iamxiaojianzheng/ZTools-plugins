@@ -7,6 +7,7 @@ import { clearMarkdownImageWidth, getMarkdownImages, IMAGE_WIDTH_MAX, removeMark
 const props = defineProps<{
   modelValue: string
   mode: 'ir' | 'sv'
+  darkTheme: boolean
   disabled: boolean
   workspacePath: string
   notePath: string
@@ -27,7 +28,6 @@ const host = ref<HTMLElement | null>(null)
 const shell = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
 let editor: Vditor | null = null
-const darkThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
 let applyingExternalValue = false
 const editorReady = ref(false)
 let selectedImageNode: HTMLElement | null = null
@@ -578,13 +578,13 @@ function createEditor() {
     height: '100%',
     minHeight: 240,
     lang: 'zh_CN',
-    theme: darkThemeQuery.matches ? 'dark' : 'classic',
+    theme: props.darkTheme ? 'dark' : 'classic',
     cache: { enable: false },
     preview: {
       mode: 'editor',
       maxWidth: 100000,
       theme: {
-        current: darkThemeQuery.matches ? 'dark' : 'light',
+        current: props.darkTheme ? 'dark' : 'light',
       },
       markdown: {
         codeBlockPreview: true,
@@ -636,6 +636,7 @@ function createEditor() {
     },
     after() {
       editorReady.value = true
+      updateEditorTheme()
       scheduleImageWidths()
       if (props.disabled) editor?.disabled()
       const editorElement = host.value
@@ -806,13 +807,15 @@ defineExpose({ scrollToHeading, exitFullscreen, insertNoteLink, insertTable, fin
 
 onMounted(() => {
   window.addEventListener('keydown', handleFullscreenShortcut, true)
-  darkThemeQuery.addEventListener('change', updateEditorTheme)
   createEditor()
 })
 
-function updateEditorTheme(event: MediaQueryListEvent) {
-  editor?.setTheme(event.matches ? 'dark' : 'classic', event.matches ? 'dark' : 'light')
+function updateEditorTheme() {
+  if (!editorReady.value) return
+  editor?.setTheme(props.darkTheme ? 'dark' : 'classic', props.darkTheme ? 'dark' : 'light')
 }
+
+watch(() => props.darkTheme, updateEditorTheme)
 
 watch(() => props.modelValue, (value) => {
   if (!editor || editor.getValue() === value) return
@@ -844,7 +847,6 @@ watch([() => props.mode, () => props.baseUrl], async () => {
 onBeforeUnmount(() => {
   clearFindHighlight()
   window.removeEventListener('keydown', handleFullscreenShortcut, true)
-  darkThemeQuery.removeEventListener('change', updateEditorTheme)
   fullscreenObserver?.disconnect()
   imageMarkerObserver?.disconnect()
   editor?.destroy()
