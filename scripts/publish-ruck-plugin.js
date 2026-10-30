@@ -353,6 +353,29 @@ function preparePublishDir(pluginDir, targetVersion) {
       }
     }
 
+    // 4. 检查并确保 pluginMeta.logo 存在于 dist 产物中
+    if (pluginMeta.logo && !pluginMeta.logo.startsWith('http')) {
+      const declaredLogo = pluginMeta.logo.replace(/^\.\//, '');
+      const distLogoPath = path.join(distDir, declaredLogo);
+      if (!fs.existsSync(distLogoPath)) {
+        const srcLogoPath = fs.existsSync(path.join(pluginDir, 'public', declaredLogo))
+          ? path.join(pluginDir, 'public', declaredLogo)
+          : path.join(pluginDir, declaredLogo);
+        if (fs.existsSync(srcLogoPath)) {
+          fs.copyFileSync(srcLogoPath, distLogoPath);
+          info(`已补齐清单声明的图标资源: ${declaredLogo} -> dist/`);
+        } else {
+          warn(`⚠️ 清单声明的图标 ${declaredLogo} 在源码中未检索到，请核实！`);
+        }
+      }
+      if (fs.existsSync(distLogoPath) && declaredLogo.toLowerCase().endsWith('.svg')) {
+        const svgContent = fs.readFileSync(distLogoPath, 'utf8');
+        if (!svgContent.includes('<svg')) {
+          warn(`⚠️ 检测到 SVG 图标内容异常（缺少 <svg 标签）: ${declaredLogo}`);
+        }
+      }
+    }
+
     return distDir;
   } else {
     info(`📦 准备发布插件根目录产物...`);
