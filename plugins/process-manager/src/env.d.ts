@@ -63,7 +63,7 @@ interface ProcessInfo {
 interface Services {
   listProcesses: () => Promise<ProcessRaw[]>
   scanPorts: () => Promise<PortEntry[]>
-  pathInfo: (filePath: string) => PathInfoResult
+  pathInfo: (filePath: string) => PathInfoResult | Promise<PathInfoResult>
   whoLocks: (filePath: string, options?: WhoLocksOptions) => Promise<WhoLocksResult>
   killProcess: (pid: number) => Promise<KillResult>
 }

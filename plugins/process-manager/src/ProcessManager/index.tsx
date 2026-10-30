@@ -108,8 +108,19 @@ export default function ProcessManager({ keyword }: Props) {
       setPathKind(null)
       return
     }
-    const info = window.services.pathInfo(target)
-    setPathKind(info.exists ? (info.isDirectory ? 'directory' : 'file') : 'missing')
+    let cancelled = false
+    Promise.resolve(window.services.pathInfo(target))
+      .then((info) => {
+        if (cancelled) return
+        setPathKind(info && info.exists ? (info.isDirectory ? 'directory' : 'file') : 'missing')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setPathKind('missing')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [keyword])
 
   useEffect(() => {
