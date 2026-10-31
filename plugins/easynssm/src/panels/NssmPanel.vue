@@ -202,9 +202,9 @@ defineExpose({ refresh, openEdit })
 </script>
 
 <template>
-  <div>
+  <div class="nssm-panel">
     <!-- nssm 未就绪：引导（配置入口在全局头部「nssm 路径」按钮） -->
-    <el-alert v-if="!env.found" type="error" :closable="false" style="margin-bottom: 10px">
+    <el-alert v-if="!env.found" type="error" :closable="false" style="margin-bottom: 10px; flex-shrink: 0;">
       <template #title>
         未检测到可用的 nssm.exe —— 插件不内置二进制（避免杀软误报）。
         <el-link type="primary" style="vertical-align: baseline" @click="emit('open-path')">去配置路径</el-link>
@@ -234,31 +234,33 @@ defineExpose({ refresh, openEdit })
       <el-button size="small" type="primary" :disabled="!env.found" @click="openInstall">安装新服务</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="filtered" size="small" max-height="400" @row-click="openDetail">
-      <el-table-column label="服务名" min-width="140">
-        <template #default="{ row }">
-          <div class="svc-name">{{ row.Name }}</div>
-          <div class="svc-sub">{{ row.DisplayName }}</div>
-        </template>
-      </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="stateTagType(row.State)" size="small">{{ stateText(row.State) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="启动类型" width="90">
-        <template #default="{ row }">{{ startModeText(row.StartMode) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="230">
-        <template #default="{ row }">
-          <el-button size="small" type="primary" link @click.stop="openEdit(row.Name)">编辑</el-button>
-          <el-button size="small" type="danger" link @click.stop="removeService(row)">卸载</el-button>
-          <el-button size="small" type="success" link :disabled="row.State === 'Running'" @click.stop="doAction(row, 'start')">启动</el-button>
-          <el-button size="small" type="warning" link :disabled="row.State === 'Stopped'" @click.stop="doAction(row, 'stop')">停止</el-button>
-          <el-button size="small" type="primary" link :disabled="row.State === 'Stopped'" @click.stop="doAction(row, 'restart')">重启</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <div class="table-wrap">
+      <el-table v-loading="loading" :data="filtered" size="small" height="100%" @row-click="openDetail">
+        <el-table-column label="服务名" min-width="140">
+          <template #default="{ row }">
+            <div class="svc-name">{{ row.Name }}</div>
+            <div class="svc-sub">{{ row.DisplayName }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="stateTagType(row.State)" size="small">{{ stateText(row.State) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="启动类型" width="90">
+          <template #default="{ row }">{{ startModeText(row.StartMode) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="230">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" link @click.stop="openEdit(row.Name)">编辑</el-button>
+            <el-button size="small" type="danger" link @click.stop="removeService(row)">卸载</el-button>
+            <el-button size="small" type="success" link :disabled="row.State === 'Running'" @click.stop="doAction(row, 'start')">启动</el-button>
+            <el-button size="small" type="warning" link :disabled="row.State === 'Stopped'" @click.stop="doAction(row, 'stop')">停止</el-button>
+            <el-button size="small" type="primary" link :disabled="row.State === 'Stopped'" @click.stop="doAction(row, 'restart')">重启</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
 
     <!-- 详情抽屉：服务信息 + nssm 参数 -->
     <el-drawer v-model="detailVisible" :title="detailSvc?.Name" size="420px" :lock-scroll="false">
@@ -338,12 +340,25 @@ defineExpose({ refresh, openEdit })
 </template>
 
 <style scoped>
+.nssm-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .toolbar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
   flex-wrap: wrap;
+}
+
+.table-wrap {
+  flex: 1;
+  min-height: 0;
 }
 
 .svc-name {

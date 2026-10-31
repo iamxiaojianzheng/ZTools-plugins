@@ -88,16 +88,33 @@ export async function pollUntilSettled(
   }
 }
 
-// 系统文件/目录选择框（Electron dialog，同步返回；取消返回 ''）
-export function pickPath(
+// 系统文件/目录选择框（兼容 Ruck 异步对话框与 Electron dialog）
+export async function pickPath(
   kind: 'file' | 'folder',
   title: string,
   filters?: { name: string; extensions: string[] }[]
-): string {
+): Promise<string> {
   const properties: ('openFile' | 'openDirectory' | 'createDirectory')[] =
     kind === 'folder' ? ['openDirectory', 'createDirectory'] : ['openFile']
-  const res = window.ztools.showOpenDialog({ title, properties, filters })
-  return res && res.length ? res[0] : ''
+  const ruck = typeof window !== 'undefined' ? (window as any).ruck : null
+  if (ruck?.window?.showOpenDialog) {
+    try {
+      const res = await ruck.window.showOpenDialog({
+        title,
+        directory: kind === 'folder',
+        filters
+      })
+      if (Array.isArray(res)) return res[0] || ''
+      if (typeof res === 'string') return res
+      return ''
+    } catch (e) {
+      console.warn('[api] ruck.window.showOpenDialog error:', e)
+    }
+  }
+
+  const res = (window as any).ztools?.showOpenDialog?.({ title, properties, filters, directory: kind === 'folder' })
+  const unwrapped = res instanceof Promise ? await res : res
+  return unwrapped && unwrapped.length ? unwrapped[0] : ''
 }
 
 // binPath 是否由 nssm 托管

@@ -45,8 +45,8 @@ function openPathDialog() {
   pathDialog.value = true
 }
 
-function browseNssm() {
-  const p = pickPath('file', '选择 nssm.exe', [{ name: 'nssm 程序', extensions: ['exe'] }])
+async function browseNssm() {
+  const p = await pickPath('file', '选择 nssm.exe', [{ name: 'nssm 程序', extensions: ['exe'] }])
   if (p) nssmPathInput.value = p
 }
 
@@ -73,31 +73,24 @@ function openDownload() {
 
 let entered = false
 
-// 窗口高度跟随内容：写死 640 会在内容不足时底部留白
-// ResizeObserver 监听 .app 高度变化（切标签页/数据加载），防抖后同步 setExpendHeight
-let fitTimer: ReturnType<typeof setTimeout> | undefined
-function fitHeight() {
-  if (typeof (window.ztools as any).setExpendHeight !== 'function') return
-  const h = Math.ceil(document.documentElement.scrollHeight)
-  if (h > 100) window.ztools.setExpendHeight(Math.min(h, 760))
-}
-function scheduleFit() {
-  clearTimeout(fitTimer)
-  fitTimer = setTimeout(fitHeight, 150)
+function initHeight() {
+  if (typeof (window.ztools as any)?.setExpendHeight === 'function') {
+    window.ztools.setExpendHeight(600)
+  }
 }
 
 onMounted(() => {
+  initHeight()
   // 列表/环境刷新只以 onPluginEnter 为单一入口，避免进插件时连刷两次
   window.ztools.onPluginEnter(() => {
     entered = true
+    initHeight()
     refreshAll()
   })
   // 兜底：个别宿主时序下进插件可能不触发 onPluginEnter，800ms 后自行刷一次
   setTimeout(() => {
     if (!entered) refreshAll()
   }, 800)
-  scheduleFit()
-  new ResizeObserver(scheduleFit).observe(document.querySelector('.app')!)
 })
 </script>
 
@@ -116,7 +109,7 @@ onMounted(() => {
       <el-button size="small" :loading="checking" @click="refreshAll">刷新</el-button>
     </div>
 
-    <el-tabs v-model="tab">
+    <el-tabs v-model="tab" class="main-tabs">
       <el-tab-pane label="系统服务" name="services">
         <ServicesPanel ref="servicesRef" @manage-nssm="gotoNssmEdit" />
       </el-tab-pane>
@@ -146,6 +139,7 @@ onMounted(() => {
 
 <style scoped>
 .header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -156,5 +150,31 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.main-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.el-tabs__header) {
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+
+:deep(.el-tabs__content) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.el-tab-pane) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 </style>

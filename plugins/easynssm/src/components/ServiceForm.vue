@@ -47,9 +47,9 @@ function str(v: string | string[] | undefined): string {
 }
 
 // ==================== 浏览选择 ====================
-function browse(kind: 'application' | 'appDirectory' | 'stdout' | 'stderr') {
+async function browse(kind: 'application' | 'appDirectory' | 'stdout' | 'stderr') {
   if (kind === 'appDirectory') {
-    const p = pickPath('folder', '选择启动目录')
+    const p = await pickPath('folder', '选择启动目录')
     if (p) appDirectory.value = p
     return
   }
@@ -57,7 +57,7 @@ function browse(kind: 'application' | 'appDirectory' | 'stdout' | 'stderr') {
     kind === 'application'
       ? [{ name: '可执行文件', extensions: ['exe', 'bat', 'cmd'] }, { name: '所有文件', extensions: ['*'] }]
       : [{ name: '日志文件', extensions: ['log', 'txt'] }, { name: '所有文件', extensions: ['*'] }]
-  const p = pickPath('file', kind === 'application' ? '选择程序' : '选择日志文件', filters)
+  const p = await pickPath('file', kind === 'application' ? '选择程序' : '选择日志文件', filters)
   if (!p) return
   if (kind === 'application') application.value = p
   else if (kind === 'stdout') stdout.value = p

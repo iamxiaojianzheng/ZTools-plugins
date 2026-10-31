@@ -90,7 +90,7 @@ defineExpose({ refresh })
 </script>
 
 <template>
-  <div>
+  <div class="services-panel">
     <div class="toolbar">
       <el-input
         v-model="keyword"
@@ -108,15 +108,16 @@ defineExpose({ refresh })
       <span class="tip">共 {{ filtered.length }} 项</span>
     </div>
 
-    <el-alert v-if="loadError" type="error" :title="loadError" :closable="false" />
+    <el-alert v-if="loadError" type="error" :title="loadError" :closable="false" style="margin-bottom: 8px" />
 
-    <el-table
-      v-loading="loading"
-      :data="filtered"
-      size="small"
-      max-height="440"
-      @row-click="openDetail"
-    >
+    <div class="table-wrap">
+      <el-table
+        v-loading="loading"
+        :data="filtered"
+        size="small"
+        height="100%"
+        @row-click="openDetail"
+      >
       <el-table-column label="显示名" min-width="180">
         <template #default="{ row }">
           <div class="svc-name">{{ row.DisplayName || row.Name }}</div>
@@ -169,6 +170,7 @@ defineExpose({ refresh })
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-drawer v-model="drawer" :title="selected?.DisplayName || selected?.Name" size="420px" :lock-scroll="false">
       <template v-if="selected">
@@ -203,11 +205,24 @@ defineExpose({ refresh })
 </template>
 
 <style scoped>
+.services-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .toolbar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
+}
+
+.table-wrap {
+  flex: 1;
+  min-height: 0;
 }
 
 .svc-name {
