@@ -1,0 +1,45 @@
+{
+  "$schema": "node_modules/@ztools-center/ztools-api-types/resource/ztools.schema.json",
+  "name": "@ruck-plugins/easyenv",
+  "title": "EasyEnv 环境变量管理",
+  "pluginName": "EasyEnv 环境变量管理",
+  "description": "Windows 环境变量的可视化管理器：用户/系统变量查看与增删改、PATH 逐条编辑与无效路径检测、备选值一键切换、批量提权写入、快照回滚",
+  "author": "咖啡八杯",
+  "version": "1.0.0",
+  "pluginType": "ui",
+  "main": "index.html",
+  "preload": "preload.js",
+  "logo": "logo.png",
+  "development": {
+    "main": "http://localhost:5173"
+  },
+  "permissions": [
+    {
+      "shell_execute": [
+        "powershell.exe",
+        "powershell",
+        "explorer.exe",
+        "explorer"
+      ]
+    },
+    "clipboard_read",
+    "clipboard_write",
+    "window_control",
+    "system_info"
+  ],
+  "features": [
+    {
+      "code": "main",
+      "explain": "可视化管理 Windows 用户 / 系统环境变量",
+      "icon": "logo.png",
+      "cmds": [
+        "环境变量",
+        "env",
+        "easyenv"
+      ]
+    }
+  ],
+  "platform": [
+    "win32"
+  ]
+}

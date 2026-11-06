@@ -100,8 +100,8 @@ function addRow() {
 }
 
 // 选文件夹直接追加一条，省得手打路径
-function addFromFolder() {
-  const p = pickPath('folder', '选择要加入 PATH 的文件夹')
+async function addFromFolder() {
+  const p = await pickPath('folder', '选择要加入 PATH 的文件夹')
   if (!p) return
   if (entries.value.some((e) => e.raw.trim().toUpperCase() === p.toUpperCase())) {
     ElMessage.info('该路径已在列表中')

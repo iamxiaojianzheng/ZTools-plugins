@@ -1,11 +1,11 @@
 {
-  "name": "easyenv",
+  "name": "@ruck-plugins/easyenv",
   "version": "1.0.0",
   "description": "可视化管理 Windows 用户/系统环境变量：PATH 逐条编辑、备选值一键切换、批量提权写入、快照回滚",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build"
+    "build": "node build.js && vue-tsc && vite build"
   },
   "dependencies": {
     "element-plus": "^2.14.2",
@@ -14,6 +14,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
     "@ztools-center/ztools-api-types": "^1.0.1",
+    "esbuild": "^0.28.2",
     "typescript": "^5.3.0",
     "unplugin-auto-import": "^21.0.0",
     "unplugin-vue-components": "^32.1.0",

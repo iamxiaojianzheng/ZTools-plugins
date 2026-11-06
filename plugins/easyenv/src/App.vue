@@ -683,106 +683,108 @@ onMounted(() => {
       class="load-error"
     />
 
-    <el-table
-      v-loading="loading"
-      :data="rows"
-      size="small"
-      max-height="440"
-      row-key="key"
-      class="env-table"
-      empty-text="没有匹配的变量"
-      @row-click="openDetail"
-    >
-      <el-table-column label="变量名" min-width="170">
-        <template #default="{ row }">
-          <span class="var-name" :class="{ 'is-del': row.pending === 'delete' }">
-            {{ row.name || '(默认)' }}
-          </span>
-          <el-tag
-            v-if="row.pending === 'add'"
-            type="success"
-            size="small"
-            effect="plain"
-            class="pl"
-          >
-            新增
-          </el-tag>
-          <el-tag
-            v-else-if="row.pending === 'set'"
-            type="warning"
-            size="small"
-            effect="plain"
-            class="pl"
-          >
-            待确认
-          </el-tag>
-          <el-tag
-            v-else-if="row.pending === 'delete'"
-            type="danger"
-            size="small"
-            effect="plain"
-            class="pl"
-          >
-            待删除
-          </el-tag>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="值" min-width="300">
-        <template #default="{ row }">
-          <div class="val-cell" :class="{ 'is-del': row.pending === 'delete' }">
-            <template v-if="isPathVar(row.name)">
-              <el-tag size="small" type="info" effect="plain">
-                {{ splitPath(showValue(row)).length }} 条路径
-              </el-tag>
-              <span class="val-text">{{ splitPath(showValue(row)).slice(0, 2).join(' ; ') }}</span>
-            </template>
-            <span v-else class="val-text">{{ showValue(row) || '（空）' }}</span>
-          </div>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="操作" width="210" align="right">
-        <template #default="{ row }">
-          <!-- 包一层阻断冒泡：点操作按钮不应该同时打开行详情 -->
-          <span @click.stop>
-            <el-tooltip
-              v-if="canSwitch(row.name)"
-              content="点一次换下一个值；不点「确认」不会写入"
-              placement="top"
+    <div class="table-wrap">
+      <el-table
+        v-loading="loading"
+        :data="rows"
+        size="small"
+        height="100%"
+        row-key="key"
+        class="env-table"
+        empty-text="没有匹配的变量"
+        @row-click="openDetail"
+      >
+        <el-table-column label="变量名" min-width="170">
+          <template #default="{ row }">
+            <span class="var-name" :class="{ 'is-del': row.pending === 'delete' }">
+              {{ row.name || '(默认)' }}
+            </span>
+            <el-tag
+              v-if="row.pending === 'add'"
+              type="success"
+              size="small"
+              effect="plain"
+              class="pl"
             >
-              <el-button size="small" text type="warning" @click="cycleSwitch(row)">切换</el-button>
-            </el-tooltip>
-            <template v-if="row.pending">
-              <el-button
-                v-if="row.pending !== 'delete'"
-                size="small"
-                text
-                type="primary"
-                :loading="applyingRow === row.key"
-                @click="applyRow(row)"
+              新增
+            </el-tag>
+            <el-tag
+              v-else-if="row.pending === 'set'"
+              type="warning"
+              size="small"
+              effect="plain"
+              class="pl"
+            >
+              待确认
+            </el-tag>
+            <el-tag
+              v-else-if="row.pending === 'delete'"
+              type="danger"
+              size="small"
+              effect="plain"
+              class="pl"
+            >
+              待删除
+            </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="值" min-width="300">
+          <template #default="{ row }">
+            <div class="val-cell" :class="{ 'is-del': row.pending === 'delete' }">
+              <template v-if="isPathVar(row.name)">
+                <el-tag size="small" type="info" effect="plain">
+                  {{ splitPath(showValue(row)).length }} 条路径
+                </el-tag>
+                <span class="val-text">{{ splitPath(showValue(row)).slice(0, 2).join(' ; ') }}</span>
+              </template>
+              <span v-else class="val-text">{{ showValue(row) || '（空）' }}</span>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="操作" width="210" align="right">
+          <template #default="{ row }">
+            <!-- 包一层阻断冒泡：点操作按钮不应该同时打开行详情 -->
+            <span @click.stop>
+              <el-tooltip
+                v-if="canSwitch(row.name)"
+                content="点一次换下一个值；不点「确认」不会写入"
+                placement="top"
               >
-                确认
-              </el-button>
-              <el-button size="small" text @click="undo(row)">撤销</el-button>
-            </template>
-            <template v-else>
-              <el-button
-                v-if="isPathVar(row.name)"
-                size="small"
-                text
-                type="primary"
-                @click="openPath(row)"
-              >
-                路径
-              </el-button>
-              <el-button size="small" text @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" text type="danger" @click="queueDelete(row)">删除</el-button>
-            </template>
-          </span>
-        </template>
-      </el-table-column>
-    </el-table>
+                <el-button size="small" text type="warning" @click="cycleSwitch(row)">切换</el-button>
+              </el-tooltip>
+              <template v-if="row.pending">
+                <el-button
+                  v-if="row.pending !== 'delete'"
+                  size="small"
+                  text
+                  type="primary"
+                  :loading="applyingRow === row.key"
+                  @click="applyRow(row)"
+                >
+                  确认
+                </el-button>
+                <el-button size="small" text @click="undo(row)">撤销</el-button>
+              </template>
+              <template v-else>
+                <el-button
+                  v-if="isPathVar(row.name)"
+                  size="small"
+                  text
+                  type="primary"
+                  @click="openPath(row)"
+                >
+                  路径
+                </el-button>
+                <el-button size="small" text @click="openEdit(row)">编辑</el-button>
+                <el-button size="small" text type="danger" @click="queueDelete(row)">删除</el-button>
+              </template>
+            </span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
 
     <div class="table-hint">
       点击行看详情；有备选值的变量点「切换」就地换下一个值，可以一直点，点「确认」才真正写入
@@ -854,6 +856,7 @@ onMounted(() => {
 
 <style scoped>
 .header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -875,12 +878,24 @@ onMounted(() => {
   width: 160px;
 }
 .load-error {
+  flex-shrink: 0;
   margin-bottom: 10px;
 }
+.table-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.env-table {
+  flex: 1;
+  min-height: 0;
+}
 .table-hint {
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--el-text-color-secondary);
-  margin-top: 4px;
+  margin-top: 6px;
 }
 .env-table :deep(.el-table__row) {
   cursor: pointer;
@@ -912,6 +927,7 @@ onMounted(() => {
   color: var(--el-text-color-disabled);
 }
 .apply-bar {
+  flex-shrink: 0;
   position: sticky;
   bottom: 0;
   display: flex;

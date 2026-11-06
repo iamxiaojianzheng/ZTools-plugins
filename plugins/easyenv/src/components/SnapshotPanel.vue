@@ -135,10 +135,10 @@ async function restore(s: Snapshot) {
   }
 }
 
-function exportOne(s: Snapshot) {
-  const r = window.services.exportSnapshot(s.id)
+async function exportOne(s: Snapshot) {
+  const r = await Promise.resolve(window.services.exportSnapshot(s.id))
   if (r.ok) {
-    ElMessage.success('已导出到：' + r.path)
+    ElMessage.success('已导出：' + (r.path || '快照文件'))
   } else {
     ElMessage.error('导出失败：' + (r.error || '未知错误'))
   }
@@ -157,8 +157,8 @@ async function remove(s: Snapshot) {
   load()
 }
 
-function importOne() {
-  const r = window.services.importSnapshot()
+async function importOne() {
+  const r = await window.services.importSnapshot()
   if (r.ok) {
     ElMessage.success('已导入快照')
     load()

@@ -14,7 +14,7 @@ export default defineConfig({
   ],
   base: './',
   build: {
-    outDir: 'src-ztools/dist',
+    outDir: 'dist',
     emptyOutDir: true
   }
 })

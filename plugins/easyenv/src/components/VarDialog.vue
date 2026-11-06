@@ -55,8 +55,8 @@ const multiPathHome = computed(
 const kindHelp = computed(() => kindExplain(kind.value, value.value))
 
 // 选择文件 / 文件夹：选中后并进现有值，也可以不点直接手写
-function browse(type: 'file' | 'folder') {
-  const p = pickPath(type, type === 'folder' ? '选择文件夹' : '选择文件')
+async function browse(type: 'file' | 'folder') {
+  const p = await pickPath(type, type === 'folder' ? '选择文件夹' : '选择文件')
   if (!p) return
   value.value = appendPickedPath(value.value, p)
 }

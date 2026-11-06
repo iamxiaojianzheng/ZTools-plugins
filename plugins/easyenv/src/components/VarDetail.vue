@@ -152,8 +152,8 @@ async function addPreset() {
   }
 }
 
-function addPresetFromFolder() {
-  const p = pickPath('folder', '选择作为备选值的目录')
+async function addPresetFromFolder() {
+  const p = await pickPath('folder', '选择作为备选值的目录')
   if (p) commitPresets([...presetList.value, p])
 }
 

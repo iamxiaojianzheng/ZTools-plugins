@@ -169,11 +169,27 @@ export function openInExplorer(target: string, envMap?: Record<string, string>):
   return true
 }
 
-// 系统文件/文件夹选择框（Electron dialog，取消返回 ''）
-export function pickPath(kind: 'file' | 'folder', title: string): string {
+// 系统文件/文件夹选择框（适配 Ruck 异步对话框，兼顾 Electron 同步，取消返回 ''）
+export async function pickPath(kind: 'file' | 'folder', title: string): Promise<string> {
   const properties = kind === 'folder' ? ['openDirectory', 'createDirectory'] : ['openFile']
-  const res = window.ztools.showOpenDialog({ title, properties } as any)
-  return res && res.length ? res[0] : ''
+  const ruck = typeof window !== 'undefined' ? (window as any).ruck : null
+  if (ruck?.window?.showOpenDialog) {
+    try {
+      const res = await ruck.window.showOpenDialog({
+        title,
+        directory: kind === 'folder'
+      })
+      if (Array.isArray(res)) return res[0] || ''
+      if (typeof res === 'string') return res
+    } catch (e) {}
+  }
+  if (window.ztools?.showOpenDialog) {
+    try {
+      const res = await Promise.resolve(window.ztools.showOpenDialog({ title, properties } as any))
+      return res && res.length ? res[0] : ''
+    } catch (e) {}
+  }
+  return ''
 }
 
 // 把选中的路径并进现有值：空值直接填，否则用分号追加（PATH 类变量的常见用法）

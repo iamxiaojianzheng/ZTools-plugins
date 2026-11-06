@@ -3,6 +3,7 @@ body,
 #app {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -10,7 +11,12 @@ body {
 }
 
 .app {
-  padding: 0 12px 12px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* 表单/弹窗里的灰色小注释 */
