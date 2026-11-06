@@ -1,22 +1,37 @@
 {
   "$schema": "node_modules/@ztools-center/ztools-api-types/resource/ztools.schema.json",
-  "name": "virtual-data",
+  "name": "@ruck-plugins/virtual-data",
+  "pluginType": "ui",
   "title": "虚拟数据",
-  "description": "使用mockjs生成虚拟数据便于使用",
+  "description": "使用 Mock.js 快速生成与管理虚拟测试数据",
   "author": "Jeffrey",
   "version": "1.0.1",
   "main": "index.html",
-  "preload": "preload/services.js",
+  "preload": "preload.js",
   "logo": "logo.png",
   "development": {
     "main": "http://localhost:5173"
   },
+  "permissions": [
+    "clipboard_write",
+    "window_control",
+    "notification",
+    "storage_get",
+    "storage_put",
+    "storage_delete"
+  ],
   "features": [
     {
       "code": "xn",
       "explain": "虚拟数据",
       "icon": "logo.png",
-      "cmds": ["虚拟数据", "xn"]
+      "cmds": [
+        "虚拟数据",
+        "mock",
+        "xn",
+        "造数据",
+        "假数据"
+      ]
     }
   ]
 }

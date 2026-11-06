@@ -1,0 +1,78 @@
+/**
+ * build-compat.js
+ * 编译 src-compat 为纯浏览器 IIFE 格式的 preload.js
+ */
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+
+let esbuild;
+try {
+  esbuild = (await import('esbuild')).default;
+} catch (e1) {
+  try {
+    esbuild = require('esbuild');
+  } catch (e2) {
+    const candidatePaths = [
+      path.resolve(__dirname, 'node_modules/esbuild'),
+      path.resolve(__dirname, '../../node_modules/esbuild'),
+      path.resolve(__dirname, '../color-helper/node_modules/esbuild'),
+      path.resolve(__dirname, '../devbox/node_modules/esbuild'),
+      path.resolve(__dirname, '../tinypng/node_modules/esbuild'),
+      path.resolve(__dirname, '../otp-2fa/node_modules/esbuild'),
+      path.resolve(__dirname, '../todos/node_modules/esbuild'),
+      'D:/github/ruck/node_modules/esbuild',
+    ];
+    for (const p of candidatePaths) {
+      try {
+        esbuild = require(p);
+        if (esbuild) break;
+      } catch (err) {}
+    }
+    if (!esbuild) {
+      throw new Error('未找到可用 esbuild，请在项目内安装或检查兄弟插件依赖。');
+    }
+  }
+}
+
+const entryPoint = path.resolve(__dirname, 'src-compat/index.js');
+const publicPreload = path.resolve(__dirname, 'public/preload.js');
+const rootPreload = path.resolve(__dirname, 'preload.js');
+
+const publicDir = path.resolve(__dirname, 'public');
+if (!fs.existsSync(publicDir)) {
+  fs.mkdirSync(publicDir, { recursive: true });
+}
+
+try {
+  esbuild.buildSync({
+    entryPoints: [entryPoint],
+    bundle: true,
+    format: 'iife',
+    target: 'es2020',
+    platform: 'browser',
+    outfile: publicPreload,
+    minify: false,
+    sourcemap: false,
+  });
+
+  // 同步拷贝到根目录
+  fs.copyFileSync(publicPreload, rootPreload);
+
+  // 同步 public/plugin.json 到根目录 plugin.json
+  const publicPluginJson = path.resolve(__dirname, 'public/plugin.json');
+  const rootPluginJson = path.resolve(__dirname, 'plugin.json');
+  if (fs.existsSync(publicPluginJson)) {
+    fs.copyFileSync(publicPluginJson, rootPluginJson);
+  }
+
+  console.log('✅ [VirtualData] Preload 成功编译并同步至 public/preload.js 与 preload.js');
+} catch (buildErr) {
+  console.error('❌ Preload 编译失败:', buildErr);
+  process.exit(1);
+}

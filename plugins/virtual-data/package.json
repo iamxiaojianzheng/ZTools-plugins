@@ -1,11 +1,12 @@
 {
-  "name": "virtual-data",
-  "version": "1.0.0",
-  "description": "A ZTools plugin",
+  "name": "@ruck-plugins/virtual-data",
+  "version": "1.0.1",
+  "description": "Ruck / ZTools 插件 - 使用 Mock.js 快速生成与管理虚拟测试数据",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build:compat": "node build-compat.js",
+    "build": "node build-compat.js && vite build"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",
@@ -17,6 +18,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
     "@ztools-center/ztools-api-types": "^1.0.1",
+    "esbuild": "^0.24.0",
     "typescript": "^5.3.0",
     "unplugin-auto-import": "^21.0.0",
     "unplugin-vue-components": "^32.0.0",
