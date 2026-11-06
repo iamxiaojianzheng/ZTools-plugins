@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   Check,
@@ -15,6 +15,30 @@ import {
   Upload
 } from 'lucide-vue-next'
 import { ZButton, ZInput, ZSwitch, ZTag } from 'ztools-ui'
+import DownSelect from './components/DownSelect.vue'
+
+function debugUi(event: string, details: Record<string, string | number | boolean> = {}): void {
+  try {
+    if (window.webQuickOpen?.writeDebugLog) {
+      window.webQuickOpen.writeDebugLog(event, details)
+      return
+    }
+    console.debug('[WebQuickOpen][ui]', {
+      timestamp: new Date().toISOString(),
+      event,
+      ...details
+    })
+  } catch {
+    // Logging must never interrupt UI interactions
+  }
+}
+
+function debugUiError(event: string, error: unknown): void {
+  const code = String((error as { code?: unknown })?.code || '')
+  debugUi(event, {
+    errorCode: /^[A-Z][A-Z0-9_]{0,39}$/.test(code) ? code : 'UNSPECIFIED'
+  })
+}
 
 type NoticeType = 'success' | 'error' | 'info'
 type SearchPreset = {
@@ -23,6 +47,9 @@ type SearchPreset = {
 }
 
 const FEATURE_PREFIX = 'quick-open-'
+const GROUP_FEATURE_PREFIX = 'quick-group-'
+const ALL_GROUPS = '全部'
+const DEFAULT_GROUP = '默认'
 const searchPresets: SearchPreset[] = [
   {
     name: '百度',
@@ -43,7 +70,21 @@ const searchPresets: SearchPreset[] = [
 ]
 
 const engines = ref<WebSearchEngine[]>([])
+const groups = ref<string[]>([])
+const browserProfiles = ref<WebQuickOpenBrowserProfile[]>([])
+const selectedGroup = ref(ALL_GROUPS)
 const loading = ref(true)
+const batchTask = ref<WebQuickOpenBatchIcons | null>(null)
+const batchRunning = computed(() =>
+  ['running', 'cancelling'].includes(batchTask.value?.status || '')
+)
+const refreshMenuOpen = ref(false)
+const refreshMenuRoot = ref<HTMLElement | null>(null)
+let batchPollTimer = 0
+let batchPollingStopped = false
+let completedBatchId = 0
+let shownBatchRevision = -1
+let batchStarting = false
 const saving = ref(false)
 const fetchingIcon = ref(false)
 const quickSavingPreset = ref('')
@@ -54,16 +95,34 @@ const notice = ref<{ type: NoticeType; text: string } | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
 const importFileInput = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
-const showCreateMenu = ref(false)
+const exporting = ref(false)
+const groupDialogMode = ref<'create' | 'rename' | null>(null)
+const groupNameInput = ref('')
+const showBrowserManager = ref(false)
+const browserManagerReturnToEditor = ref(false)
+const browserProfileQuery = ref('')
+const browserIconFileInput = ref<HTMLInputElement | null>(null)
+const fetchingBrowserIcon = ref(false)
+const brokenBrowserIcons = ref(new Set<string>())
+let browserIconTaskSequence = 0
+const browserProfileDialog = ref(false)
+const testingBrowserProfile = ref(false)
+const editingBrowserProfileId = ref('')
+const browserProfileForm = ref(createEmptyBrowserProfile())
 let noticeTimer = 0
 
 const formData = ref<WebSearchEngine>(createEmptyEngine())
 
+const groupFilteredEngines = computed(() => {
+  if (selectedGroup.value === ALL_GROUPS) return engines.value
+  return engines.value.filter((engine) => resolveGroup(engine) === selectedGroup.value)
+})
+
 const filteredEngines = computed(() => {
   const keyword = query.value.trim().toLowerCase()
-  if (!keyword) return engines.value
+  if (!keyword) return groupFilteredEngines.value
 
-  return engines.value.filter((engine) => {
+  return groupFilteredEngines.value.filter((engine) => {
     return [engine.name, engine.url, engine.keyword || '', engine.type]
       .join(' ')
       .toLowerCase()
@@ -73,9 +132,66 @@ const filteredEngines = computed(() => {
 
 const isEditing = computed(() => Boolean(editingEngine.value))
 const isWebpage = computed(() => formData.value.type === 'webpage')
-const emptyText = computed(() => (query.value.trim() ? '没有匹配的网页快开' : '还没有网页快开'))
+const currentPlatform = computed(() => {
+  if (window.ztools?.isWindows?.()) return 'win32'
+  if (window.ztools?.isMacOS?.() || window.ztools?.isMacOs?.()) return 'darwin'
+  return 'linux'
+})
+const visibleBrowserProfiles = computed(() =>
+  browserProfiles.value.filter(
+    (profile) =>
+      !profile.hidden &&
+      (!profile.platform.length || profile.platform.includes(currentPlatform.value))
+  )
+)
+const filteredBrowserProfiles = computed(() => {
+  const keyword = browserProfileQuery.value.trim().toLowerCase()
+  const profiles = browserProfiles.value.filter(
+    (profile) =>
+      !profile.builtin ||
+      !profile.platform.length ||
+      profile.platform.includes(currentPlatform.value)
+  )
+  if (!keyword) return profiles
+  return profiles.filter((profile) =>
+    [profile.name, profile.path, profile.args.join(' ')].join(' ').toLowerCase().includes(keyword)
+  )
+})
+const selectedBrowserProfile = computed(() =>
+  browserProfiles.value.find((profile) => profile.id === formData.value.browserId)
+)
+const browserSelectOptions = computed(() => {
+  const profiles = [...visibleBrowserProfiles.value]
+  const selected = selectedBrowserProfile.value
+  if (selected && !profiles.some((profile) => profile.id === selected.id)) {
+    profiles.push(selected)
+  }
+  return [
+    { label: '系统默认浏览器打开', value: 0 },
+    ...profiles.map((profile) => ({ label: profile.name, value: profile.id }))
+  ]
+})
+const emptyText = computed(() => {
+  if (query.value.trim()) return '没有匹配的网页快开'
+  return selectedGroup.value === ALL_GROUPS
+    ? '还没有网页快开'
+    : `${selectedGroup.value}分组还没有入口`
+})
+const isUserGroupSelected = computed(
+  () => selectedGroup.value !== ALL_GROUPS && selectedGroup.value !== DEFAULT_GROUP
+)
+const groupCounts = computed(() => {
+  const counts = new Map<string, number>([[DEFAULT_GROUP, 0]])
+  for (const group of groups.value) counts.set(group, 0)
+  for (const engine of engines.value) {
+    const group = resolveGroup(engine)
+    counts.set(group, (counts.get(group) || 0) + 1)
+  }
+  return counts
+})
 const existingSearchUrls = computed(
-  () => new Set(engines.value.filter((engine) => engine.type === 'search').map((engine) => engine.url))
+  () =>
+    new Set(engines.value.filter((engine) => engine.type === 'search').map((engine) => engine.url))
 )
 
 function createEmptyEngine(): WebSearchEngine {
@@ -86,11 +202,32 @@ function createEmptyEngine(): WebSearchEngine {
     icon: '',
     enabled: true,
     type: 'webpage',
-    keyword: ''
+    keyword: '',
+    group: null,
+    browserId: null
   }
 }
 
+function createEmptyBrowserProfile(): WebQuickOpenBrowserProfile {
+  return {
+    id: '',
+    name: '',
+    icon: 'custom',
+    path: '',
+    args: ['{url}'],
+    builtin: false,
+    hidden: false,
+    platform: []
+  }
+}
+
+function resolveGroup(engine: WebSearchEngine): string {
+  const value = engine.group?.trim().toLowerCase()
+  return groups.value.find((group) => group.toLowerCase() === value) || DEFAULT_GROUP
+}
+
 function showNotice(type: NoticeType, text: string): void {
+  debugUi('notice.show', { type })
   notice.value = { type, text }
   window.clearTimeout(noticeTimer)
   noticeTimer = window.setTimeout(() => {
@@ -99,6 +236,7 @@ function showNotice(type: NoticeType, text: string): void {
 }
 
 async function loadEngines(): Promise<void> {
+  debugUi('entries.load.start')
   loading.value = true
   try {
     if (!window.webQuickOpen) {
@@ -106,14 +244,35 @@ async function loadEngines(): Promise<void> {
       showNotice('info', '等待 ZTools 插件运行时')
       return
     }
-    const result = await window.webQuickOpen.getAll()
-    if (result.success && result.data) {
-      engines.value = result.data
-    } else {
-      showNotice('error', result.error || '加载失败')
+    const [engineResult, groupResult, profileResult] = await Promise.all([
+      window.webQuickOpen.getAll(),
+      window.webQuickOpen.getGroups(),
+      window.webQuickOpen.getBrowserProfiles(true)
+    ])
+    if (!engineResult.success || !groupResult.success || !profileResult.success) {
+      showNotice(
+        'error',
+        engineResult.error || groupResult.error || profileResult.error || '加载失败'
+      )
+      return
+    }
+    engines.value = engineResult.data || []
+    groups.value = groupResult.data || []
+    browserProfiles.value = profileResult.data || []
+    debugUi('entries.load.complete', {
+      entryCount: engines.value.length,
+      groupCount: groups.value.length,
+      profileCount: browserProfiles.value.length
+    })
+    if (
+      selectedGroup.value !== ALL_GROUPS &&
+      selectedGroup.value !== DEFAULT_GROUP &&
+      !groups.value.includes(selectedGroup.value)
+    ) {
+      selectedGroup.value = ALL_GROUPS
     }
   } catch (error) {
-    console.error('[WebQuickOpen] load engines failed:', error)
+    debugUiError('load.engines.failed', error)
     showNotice('error', '加载失败')
   } finally {
     loading.value = false
@@ -121,13 +280,14 @@ async function loadEngines(): Promise<void> {
 }
 
 function openAddEditor(url = ''): void {
-  showCreateMenu.value = false
+  debugUi('editor.add.open')
   editingEngine.value = null
   const normalizedUrl = url.trim() ? ensureUrlProtocol(url.trim()) : ''
   formData.value = {
     ...createEmptyEngine(),
     name: normalizedUrl ? getUrlName(normalizedUrl) : '',
-    url: normalizedUrl
+    url: normalizedUrl,
+    group: groups.value.includes(selectedGroup.value) ? selectedGroup.value : null
   }
   showEditor.value = true
 }
@@ -141,26 +301,96 @@ function getUrlName(url: string): string {
 }
 
 function openEditEditor(engine: WebSearchEngine): void {
+  debugUi('editor.edit.open')
   editingEngine.value = engine
   formData.value = {
     ...engine,
     type: engine.type || 'search',
-    keyword: engine.keyword || ''
+    keyword: engine.keyword || '',
+    browserId: engine.browserId || null
   }
   showEditor.value = true
 }
 
 function closeEditor(): void {
+  debugUi('editor.close')
   showEditor.value = false
   editingEngine.value = null
   formData.value = createEmptyEngine()
+}
+
+function startCreateGroup(): void {
+  groupDialogMode.value = 'create'
+  groupNameInput.value = ''
+}
+
+function startRenameGroup(): void {
+  if (!isUserGroupSelected.value) return
+  groupDialogMode.value = 'rename'
+  groupNameInput.value = selectedGroup.value
+}
+
+function cancelGroupDialog(): void {
+  groupDialogMode.value = null
+  groupNameInput.value = ''
+}
+
+async function saveGroupName(): Promise<void> {
+  const name = groupNameInput.value.trim()
+  const renaming = groupDialogMode.value === 'rename'
+  if (!name) {
+    showNotice('error', '分组名称不能为空')
+    return
+  }
+
+  try {
+    const result = renaming
+      ? await window.webQuickOpen.renameGroup(selectedGroup.value, name)
+      : await window.webQuickOpen.createGroup(name)
+    if (!result.success) {
+      showNotice('error', result.error || '分组保存失败')
+      return
+    }
+    groups.value = result.data || []
+    selectedGroup.value = name
+    cancelGroupDialog()
+    await loadEngines()
+    showNotice('success', renaming ? '分组已更新' : '分组已创建')
+  } catch (error) {
+    debugUiError('save.group.failed', error)
+    showNotice('error', '分组保存失败')
+  }
+}
+
+async function deleteSelectedGroup(): Promise<void> {
+  if (!isUserGroupSelected.value) return
+  const count = groupCounts.value.get(selectedGroup.value) || 0
+  const confirmed = window.confirm(
+    `确定删除分组「${selectedGroup.value}」吗？${count} 个入口将移至默认分组。`
+  )
+  if (!confirmed) return
+
+  try {
+    const result = await window.webQuickOpen.deleteGroup(selectedGroup.value)
+    if (!result.success) {
+      showNotice('error', result.error || '删除分组失败')
+      return
+    }
+    groups.value = result.data || []
+    selectedGroup.value = DEFAULT_GROUP
+    await loadEngines()
+    showNotice('success', '分组已删除，入口已移至默认')
+  } catch (error) {
+    debugUiError('delete.group.failed', error)
+    showNotice('error', '删除分组失败')
+  }
 }
 
 async function toggleEnabled(engine: WebSearchEngine, enabled: boolean): Promise<void> {
   const previous = engine.enabled
   engine.enabled = enabled
   try {
-    const result = await window.webQuickOpen.update({ ...engine, enabled })
+    const result = await window.webQuickOpen.update({ ...engine, enabled }, true)
     if (!result.success) {
       engine.enabled = previous
       showNotice('error', result.error || '更新失败')
@@ -169,7 +399,7 @@ async function toggleEnabled(engine: WebSearchEngine, enabled: boolean): Promise
     await loadEngines()
   } catch (error) {
     engine.enabled = previous
-    console.error('[WebQuickOpen] toggle failed:', error)
+    debugUiError('toggle.failed', error)
     showNotice('error', '更新失败')
   }
 }
@@ -184,7 +414,11 @@ async function saveEngine(): Promise<void> {
   saving.value = true
   try {
     const result = isEditing.value
-      ? await window.webQuickOpen.update(normalized.engine)
+      ? await window.webQuickOpen.update(
+          normalized.engine,
+          normalized.engine.icon === editingEngine.value?.icon &&
+            normalized.engine.iconSource === editingEngine.value?.iconSource
+        )
       : await window.webQuickOpen.add(normalized.engine)
 
     if (!result.success) {
@@ -196,7 +430,7 @@ async function saveEngine(): Promise<void> {
     await loadEngines()
     closeEditor()
   } catch (error) {
-    console.error('[WebQuickOpen] save failed:', error)
+    debugUiError('save.failed', error)
     showNotice('error', '保存失败')
   } finally {
     saving.value = false
@@ -218,6 +452,7 @@ async function quickAddSearchPreset(preset: SearchPreset): Promise<void> {
       name: preset.name,
       url: preset.url,
       icon: iconResult.success && iconResult.data ? iconResult.data : '',
+      iconSource: iconResult.success && iconResult.data ? 'auto' : undefined,
       enabled: true,
       type: 'search',
       keyword: ''
@@ -232,7 +467,7 @@ async function quickAddSearchPreset(preset: SearchPreset): Promise<void> {
     await loadEngines()
     closeEditor()
   } catch (error) {
-    console.error('[WebQuickOpen] quick add search preset failed:', error)
+    debugUiError('quick.add.search.preset.failed', error)
     showNotice('error', '添加失败')
   } finally {
     quickSavingPreset.value = ''
@@ -252,7 +487,7 @@ async function deleteEngine(engine: WebSearchEngine): Promise<void> {
     showNotice('success', '已删除')
     await loadEngines()
   } catch (error) {
-    console.error('[WebQuickOpen] delete failed:', error)
+    debugUiError('delete.failed', error)
     showNotice('error', '删除失败')
   }
 }
@@ -268,12 +503,13 @@ async function fetchFavicon(): Promise<void> {
     const result = await window.webQuickOpen.fetchFavicon(formData.value.url)
     if (result.success && result.data) {
       formData.value.icon = result.data
+      formData.value.iconSource = 'auto'
       showNotice('success', '已获取图标')
     } else {
       showNotice('error', result.error || '未能获取图标')
     }
   } catch (error) {
-    console.error('[WebQuickOpen] fetch favicon failed:', error)
+    debugUiError('fetch.favicon.failed', error)
     showNotice('error', '获取图标失败')
   } finally {
     fetchingIcon.value = false
@@ -281,12 +517,270 @@ async function fetchFavicon(): Promise<void> {
 }
 
 function pickIconFile(): void {
+  debugUi('icon.filePicker.open')
   iconFileInput.value?.click()
 }
 
+function openBrowserManager(): void {
+  debugUi('browserManager.open')
+  browserManagerReturnToEditor.value = showEditor.value
+  showBrowserManager.value = true
+  showEditor.value = false
+}
+
+function closeBrowserManager(): void {
+  invalidateBrowserIconTask()
+  debugUi('browserManager.close')
+  showBrowserManager.value = false
+  showEditor.value = browserManagerReturnToEditor.value
+}
+
+function isBrowserImage(icon: string): boolean {
+  return icon.startsWith('data:image/') && !brokenBrowserIcons.value.has(icon)
+}
+
+function invalidateBrowserIconTask(): void {
+  browserIconTaskSequence++
+  fetchingBrowserIcon.value = false
+}
+
+async function fetchBrowserProfileIcon(): Promise<void> {
+  const task = ++browserIconTaskSequence
+  const snapshot = JSON.stringify([browserProfileForm.value.path, browserProfileForm.value.args])
+  fetchingBrowserIcon.value = true
+  try {
+    const result = await window.webQuickOpen.fetchBrowserIcon({
+      ...browserProfileForm.value,
+      args: [...browserProfileForm.value.args]
+    })
+    if (
+      task !== browserIconTaskSequence ||
+      !browserProfileDialog.value ||
+      snapshot !== JSON.stringify([browserProfileForm.value.path, browserProfileForm.value.args])
+    )
+      return
+    if (result.success && result.data) {
+      browserProfileForm.value.icon = result.data
+      showNotice('success', '已获取浏览器图标')
+    } else showNotice('error', result.error || '未能获取图标，请上传图片')
+  } catch (error) {
+    debugUiError('browser.icon.failed', error)
+    if (task === browserIconTaskSequence) showNotice('error', '获取图标失败，请上传图片')
+  } finally {
+    if (task === browserIconTaskSequence) fetchingBrowserIcon.value = false
+  }
+}
+
+function handleBrowserIconFileChange(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (
+    !/^image\/(png|jpeg|webp|svg\+xml|x-icon|vnd\.microsoft\.icon)$/.test(file.type) ||
+    file.size > 1024 * 1024
+  ) {
+    showNotice('error', '请选择不超过 1 MB 的 PNG、JPEG、WebP、SVG 或 ICO 图片')
+    return
+  }
+  invalidateBrowserIconTask()
+  const task = browserIconTaskSequence
+  const reader = new FileReader()
+  reader.onload = () => {
+    if (task !== browserIconTaskSequence || !browserProfileDialog.value) return
+    if (typeof reader.result === 'string') {
+      browserProfileForm.value.icon = reader.result
+      debugUi('browser.icon.uploaded', { byteCount: file.size })
+      showNotice('success', '已上传浏览器图标')
+    }
+  }
+  reader.onerror = () => {
+    if (task === browserIconTaskSequence) showNotice('error', '读取图标失败')
+  }
+  reader.readAsDataURL(file)
+}
+
+function openNewBrowserProfile(): void {
+  invalidateBrowserIconTask()
+  debugUi('browserProfile.add.open')
+  editingBrowserProfileId.value = ''
+  browserProfileForm.value = createEmptyBrowserProfile()
+  browserProfileDialog.value = true
+}
+
+function editBrowserProfile(profile: WebQuickOpenBrowserProfile): void {
+  invalidateBrowserIconTask()
+  debugUi('browserProfile.edit.open')
+  editingBrowserProfileId.value = profile.id
+  browserProfileForm.value = { ...profile, args: [...profile.args] }
+  browserProfileDialog.value = true
+}
+
+function copyBrowserProfile(profile: WebQuickOpenBrowserProfile): void {
+  invalidateBrowserIconTask()
+  debugUi('browserProfile.copy.open')
+  editingBrowserProfileId.value = ''
+  browserProfileForm.value = {
+    ...profile,
+    id: '',
+    name: `${profile.name} - 副本`,
+    builtin: false,
+    hidden: false,
+    args: [...profile.args]
+  }
+  browserProfileDialog.value = true
+}
+
+function cancelBrowserProfile(): void {
+  invalidateBrowserIconTask()
+  debugUi('browserProfile.dialog.close')
+  browserProfileDialog.value = false
+  editingBrowserProfileId.value = ''
+}
+
+function parseBrowserArgs(value: string): string[] {
+  const result: string[] = []
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(value))) result.push(match[1] ?? match[2] ?? match[3])
+  return result
+}
+
+function stringifyBrowserArgs(args: string[]): string {
+  return args.map((arg) => (/\s/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg)).join(' ')
+}
+
+function browserCommandPreview(profile: WebQuickOpenBrowserProfile): string {
+  return `${profile.path} ${stringifyBrowserArgs(profile.args).replace(/\{url\}/g, 'https://example.com')}`.trim()
+}
+
+async function saveBrowserProfile(): Promise<void> {
+  const form = browserProfileForm.value
+  if (!form.name.trim() || !form.path.trim()) {
+    showNotice('error', '请填写配置名称和启动路径')
+    return
+  }
+  const profile = {
+    ...form,
+    id: editingBrowserProfileId.value || `custom-${Date.now().toString(36)}`,
+    name: form.name.trim(),
+    path: form.path.trim(),
+    args: Array.isArray(form.args) ? form.args.filter(Boolean) : []
+  }
+  const result = await window.webQuickOpen.saveBrowserProfile(profile)
+  if (!result.success) {
+    showNotice('error', result.error || '保存浏览器配置失败')
+    return
+  }
+  browserProfiles.value = result.data || []
+  cancelBrowserProfile()
+  showNotice('success', '浏览器配置已保存')
+}
+
+async function deleteBrowserProfile(profile: WebQuickOpenBrowserProfile): Promise<void> {
+  if (profile.builtin) {
+    const result = await window.webQuickOpen.toggleBrowserProfileHidden(profile.id)
+    if (!result.success) {
+      showNotice('error', result.error || '隐藏浏览器配置失败')
+      return
+    }
+    browserProfiles.value = result.data || []
+    if (profile.hidden && formData.value.browserId === profile.id) formData.value.browserId = null
+    showNotice('success', profile.hidden ? '预设已显示' : '预设已隐藏')
+    return
+  }
+  if (!window.confirm(`确定删除“${profile.name}”吗？`)) return
+  const result = await window.webQuickOpen.deleteBrowserProfile(profile.id)
+  if (!result.success) {
+    showNotice('error', result.error || '删除浏览器配置失败')
+    return
+  }
+  browserProfiles.value = result.data || []
+  if (formData.value.browserId === profile.id) formData.value.browserId = null
+  showNotice('success', '浏览器配置已删除')
+}
+
+async function resetBrowserProfiles(): Promise<void> {
+  const result = await window.webQuickOpen.resetBrowserProfiles()
+  if (result.success) {
+    browserProfiles.value = result.data || []
+    showNotice('success', '已恢复内置浏览器预设')
+  }
+}
+
+async function pickBrowserExecutableForProfile(): Promise<void> {
+  const result = await window.webQuickOpen.pickBrowserExecutable()
+  if (result.success && result.data) browserProfileForm.value.path = result.data
+}
+
+async function testBrowserProfile(): Promise<void> {
+  const form = browserProfileForm.value
+  const url = formData.value.url.trim()
+    ? formData.value.type === 'search'
+      ? formData.value.url.replace('{q}', encodeURIComponent('ztools'))
+      : formData.value.url
+    : 'https://example.com'
+  const normalizedUrl = ensureUrlProtocol(url.trim())
+  if (!isHttpUrl(normalizedUrl)) {
+    showNotice('error', '请输入有效的 HTTP 或 HTTPS 地址')
+    return
+  }
+  testingBrowserProfile.value = true
+  try {
+    const result = await window.webQuickOpen.testBrowserProfile(normalizedUrl, {
+      ...form,
+      args: Array.isArray(form.args) ? form.args : []
+    })
+    showNotice(
+      result.success ? 'success' : 'error',
+      result.success ? '已发送启动命令' : result.error || '浏览器启动失败'
+    )
+  } finally {
+    testingBrowserProfile.value = false
+  }
+}
+
+function exportEngines(): void {
+  if (exporting.value) return
+  exporting.value = true
+  void window.webQuickOpen
+    .exportJson()
+    .then((result) => {
+      if (!result.success || !result.data) {
+        showNotice('error', result.error || '导出失败')
+        return
+      }
+
+      const blob = new Blob([result.data], {
+        type: 'application/json;charset=utf-8'
+      })
+      const downloadUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = downloadUrl
+      anchor.download = `web-quick-open-${new Date().toISOString().slice(0, 10)}.json`
+      anchor.click()
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000)
+      const data = JSON.parse(result.data) as {
+        engines?: unknown[]
+        groups?: unknown[]
+      }
+      showNotice(
+        'success',
+        `已导出 ${data.engines?.length || 0} 条入口、${data.groups?.length || 0} 个分组`
+      )
+    })
+    .catch((error) => {
+      debugUiError('export.failed', error)
+      showNotice('error', '导出失败')
+    })
+    .finally(() => {
+      exporting.value = false
+    })
+}
+
 function pickImportFile(): void {
+  debugUi('import.filePicker.open')
   if (importing.value) return
-  showCreateMenu.value = false
   importFileInput.value?.click()
 }
 
@@ -296,9 +790,17 @@ function handleImportFileChange(event: Event): void {
   input.value = ''
   if (!file || importing.value) return
 
+  if (file.size > 20 * 1024 * 1024) {
+    showNotice('error', '导入文件不能超过 20 MB')
+    return
+  }
   importing.value = true
   const reader = new FileReader()
+  debugUi('import.fileRead.start', { byteCount: file.size })
   reader.onload = async () => {
+    debugUi('import.fileRead.complete', {
+      inputCharacters: typeof reader.result === 'string' ? reader.result.length : 0
+    })
     try {
       if (typeof reader.result !== 'string') {
         showNotice('error', '读取导入文件失败')
@@ -315,14 +817,14 @@ function handleImportFileChange(event: Event): void {
       if ((result.importedCount || 0) > 0) {
         showNotice(
           'success',
-          `已导入 ${result.importedCount} 条，跳过 ${result.skippedCount || 0} 条`
+          `已导入 ${result.importedCount} 条、${result.importedGroupCount || 0} 个分组，跳过 ${result.skippedCount || 0} 条`
         )
         return
       }
 
       showNotice('info', '未导入新数据，可能已存在或格式无效')
     } catch (error) {
-      console.error('[WebQuickOpen] import failed:', error)
+      debugUiError('import.failed', error)
       showNotice('error', '导入失败')
     } finally {
       importing.value = false
@@ -350,6 +852,7 @@ function handleIconFileChange(event: Event): void {
   reader.onload = () => {
     if (typeof reader.result === 'string') {
       formData.value.icon = reader.result
+      formData.value.iconSource = 'manual'
       showNotice('success', '已上传图标')
     }
   }
@@ -357,25 +860,37 @@ function handleIconFileChange(event: Event): void {
   reader.readAsDataURL(file)
 }
 
-function validateEngine(engine: WebSearchEngine): {
-  success: true
-  engine: WebSearchEngine
-} | {
-  success: false
-  error: string
-} {
+function validateEngine(engine: WebSearchEngine):
+  | {
+      success: true
+      engine: WebSearchEngine
+    }
+  | {
+      success: false
+      error: string
+    } {
   const nextEngine: WebSearchEngine = {
     id: engine.id,
     name: engine.name.trim(),
     url: engine.url.trim(),
     icon: engine.icon || '',
+    iconSource: engine.icon ? engine.iconSource : undefined,
     enabled: engine.enabled,
     type: engine.type,
-    keyword: engine.keyword?.trim() || ''
+    keyword: engine.keyword?.trim() || '',
+    group: engine.group || null,
+    browserId: engine.browserId || null
   }
 
   if (!nextEngine.name || !nextEngine.url) {
     return { success: false, error: '请填写名称和 URL' }
+  }
+
+  if (
+    nextEngine.browserId &&
+    !browserProfiles.value.some((profile) => profile.id === nextEngine.browserId)
+  ) {
+    nextEngine.browserId = null
   }
 
   nextEngine.url = ensureUrlProtocol(nextEngine.url)
@@ -430,6 +945,7 @@ function getLaunchPayload(param: LaunchParam): string {
 }
 
 async function handlePluginEnter(param: LaunchParam): Promise<void> {
+  debugUi('plugin.enter')
   const code = param?.code || ''
   if (code === 'main-push') {
     const url = param.option?.url || getLaunchPayload(param)
@@ -438,9 +954,17 @@ async function handlePluginEnter(param: LaunchParam): Promise<void> {
     }
     return
   }
-  if (!code.startsWith(FEATURE_PREFIX)) return
+  if (!code.startsWith(FEATURE_PREFIX) && !code.startsWith(GROUP_FEATURE_PREFIX)) return
 
   try {
+    if (code.startsWith(GROUP_FEATURE_PREFIX)) {
+      const name = decodeURIComponent(code.slice(GROUP_FEATURE_PREFIX.length))
+      const result = await window.webQuickOpen.openGroup(name)
+      if (result.error) window.ztools.showNotification?.(result.error)
+      if (result.success) window.webQuickOpen.hideMainWindow()
+      window.webQuickOpen.outPlugin()
+      return
+    }
     const result = await window.webQuickOpen.getAll()
     const engine = result.data?.find((item) => `${FEATURE_PREFIX}${item.id}` === code)
     if (!engine) {
@@ -449,49 +973,187 @@ async function handlePluginEnter(param: LaunchParam): Promise<void> {
       return
     }
 
-    if (engine.type === 'search') {
-      const payload = getLaunchPayload(param)
-      if (!payload) {
-        window.ztools.showNotification?.('缺少搜索关键词')
-        window.webQuickOpen.outPlugin()
-        return
-      }
-      window.webQuickOpen.openExternal(engine.url.replace('{q}', encodeURIComponent(payload)))
-    } else {
-      window.webQuickOpen.openExternal(engine.url)
+    const payload = engine.type === 'search' ? getLaunchPayload(param) : ''
+    if (engine.type === 'search' && !payload) {
+      window.ztools.showNotification?.('缺少搜索关键词')
+      window.webQuickOpen.outPlugin()
+      return
+    }
+
+    const openResult = await window.webQuickOpen.openEngine(engine.id, payload)
+    if (!openResult.success) {
+      window.ztools.showNotification?.(openResult.error || '网页快开启动失败')
+      window.webQuickOpen.outPlugin()
+      return
     }
 
     window.webQuickOpen.hideMainWindow()
     window.webQuickOpen.outPlugin()
   } catch (error) {
-    console.error('[WebQuickOpen] launch failed:', error)
+    debugUiError('launch.failed', error)
     window.ztools.showNotification?.('网页快开启动失败')
     window.webQuickOpen.outPlugin()
   }
 }
 
-function openPreview(engine: WebSearchEngine): void {
-  if (engine.type === 'search') {
-    window.webQuickOpen.openExternal(engine.url.replace('{q}', encodeURIComponent('ztools')))
-  } else {
-    window.webQuickOpen.openExternal(engine.url)
+async function openPreview(engine: WebSearchEngine): Promise<void> {
+  const result = await window.webQuickOpen.openEngine(
+    engine.id,
+    engine.type === 'search' ? 'ztools' : ''
+  )
+  if (!result.success) {
+    showNotice('error', result.error || '打开失败')
   }
 }
 
-function handleDocumentClick(): void {
-  showCreateMenu.value = false
+watch(
+  () => [browserProfileForm.value.path, JSON.stringify(browserProfileForm.value.args)],
+  invalidateBrowserIconTask
+)
+
+watch([showEditor, showBrowserManager, browserProfileDialog], () => {
+  debugUi('view.changed', {
+    editor: showEditor.value,
+    browserManager: showBrowserManager.value,
+    browserProfileDialog: browserProfileDialog.value
+  })
+})
+
+async function toggleRefreshMenu(): Promise<void> {
+  refreshMenuOpen.value = !refreshMenuOpen.value
+  if (refreshMenuOpen.value) {
+    await nextTick()
+    refreshMenuRoot.value?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+  }
+}
+
+function closeRefreshMenu(restoreFocus = false): void {
+  refreshMenuOpen.value = false
+  if (restoreFocus)
+    refreshMenuRoot.value?.querySelector<HTMLButtonElement>('[aria-haspopup]')?.focus()
+}
+
+function onDocumentClick(event: MouseEvent): void {
+  if (!refreshMenuRoot.value?.contains(event.target as Node)) closeRefreshMenu()
+}
+
+async function startBatchIcons(): Promise<void> {
+  closeRefreshMenu(true)
+  if (batchRunning.value || importing.value || batchStarting) return
+  batchStarting = true
+  try {
+    const result = await window.webQuickOpen.getAll()
+    if (!result.success) {
+      showNotice('error', result.error || '读取入口失败')
+      return
+    }
+    const entries = result.data || []
+    const count = entries.filter((entry) => !entry.icon || entry.iconSource === 'auto').length
+    if (!count) {
+      showNotice('info', '没有可获取图标的入口，已有手动或未知来源图标将被跳过')
+      return
+    }
+    if (
+      !window.confirm(
+        '将为全部入口中的 ' +
+          count +
+          ' 个入口获取图标，跳过 ' +
+          (entries.length - count) +
+          ' 个受保护图标（含手动及未知来源图标）。包含禁用入口，不受当前搜索和分组影响。是否继续？'
+      )
+    )
+      return
+    const started = await window.webQuickOpen.startBatchIcons()
+    if (!started.success) {
+      showNotice('error', started.error || '启动失败')
+      return
+    }
+    batchTask.value = started.data || null
+    shownBatchRevision = -1
+  } catch (error) {
+    debugUiError('icons.batch.startFailed', error)
+    showNotice('error', '启动图标获取任务失败')
+  } finally {
+    batchStarting = false
+  }
+}
+
+async function cancelBatchIcons(): Promise<void> {
+  if (!batchTask.value) return
+  try {
+    const result = await window.webQuickOpen.cancelBatchIcons(batchTask.value.id)
+    if (result.success) batchTask.value = result.data || null
+    else showNotice('error', result.error || '取消失败')
+  } catch (error) {
+    debugUiError('icons.batch.cancelFailed', error)
+    showNotice('error', '取消失败')
+  }
+}
+
+function dismissBatchIcons(): void {
+  if (batchTask.value) completedBatchId = batchTask.value.id
+  batchTask.value = null
+}
+
+async function pollBatchIcons(): Promise<void> {
+  try {
+    if (!window.webQuickOpen?.getBatchIconsStatus) return
+    const result = await window.webQuickOpen.getBatchIconsStatus()
+    const task = result.data
+    if (!task || batchPollingStopped) return
+    if (
+      !batchTask.value &&
+      completedBatchId === task.id &&
+      !['running', 'cancelling'].includes(task.status)
+    )
+      return
+    const previousId = batchTask.value?.id
+    batchTask.value = task
+    if (previousId !== task.id || shownBatchRevision !== task.revision) {
+      const entries = await window.webQuickOpen.getAll()
+      if (entries.success && !batchPollingStopped) {
+        engines.value = entries.data || []
+        shownBatchRevision = task.revision
+      }
+    }
+    if (!['running', 'cancelling'].includes(task.status) && completedBatchId !== task.id) {
+      completedBatchId = task.id
+      showNotice(
+        task.status === 'failed' ? 'error' : 'info',
+        (task.error || (task.status === 'cancelled' ? '已取消' : '图标获取完成')) +
+          '：更新 ' +
+          task.updated +
+          '，失败 ' +
+          task.failed +
+          '，跳过 ' +
+          task.skipped
+      )
+    }
+  } catch (error) {
+    debugUiError('icons.batch.pollFailed', error)
+  } finally {
+    if (!batchPollingStopped) batchPollTimer = window.setTimeout(pollBatchIcons, 500)
+  }
 }
 
 onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+  void pollBatchIcons()
+  debugUi('runtime.mounted')
   loadEngines()
-  document.addEventListener('click', handleDocumentClick)
   window.ztools?.onPluginEnter?.((param) => {
     void handlePluginEnter(param)
   })
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', handleDocumentClick)
+  batchPollingStopped = true
+  window.clearTimeout(batchPollTimer)
+  document.removeEventListener('click', onDocumentClick)
+  if (batchTask.value && batchRunning.value)
+    void window.webQuickOpen.cancelBatchIcons(batchTask.value.id)
+  debugUi('runtime.unmounted')
+  window.clearTimeout(noticeTimer)
 })
 </script>
 
@@ -503,7 +1165,7 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <section v-if="!showEditor" class="manager-view">
+    <section v-if="!showEditor && !showBrowserManager" class="manager-view">
       <div class="toolbar">
         <ZInput v-model="query" type="search" clearable placeholder="搜索名称、URL 或关键字">
           <template #prefix>
@@ -511,35 +1173,79 @@ onUnmounted(() => {
           </template>
         </ZInput>
         <div class="toolbar-actions">
-          <ZButton size="medium" :disabled="loading || importing" @click="loadEngines">
-            <template #icon>
-              <RotateCw :size="15" />
-            </template>
-            刷新
-          </ZButton>
-          <div class="split-create-group" @click.stop>
-            <button class="split-create-main" type="button" @click="() => openAddEditor()">
-              <Plus :size="15" />
-              <span>添加</span>
-            </button>
-            <button
-              class="split-create-arrow"
-              :class="{ active: showCreateMenu }"
-              type="button"
-              title="更多添加操作"
-              @click.stop="showCreateMenu = !showCreateMenu"
+          <div
+            ref="refreshMenuRoot"
+            class="refresh-split"
+            @keydown.esc.prevent="closeRefreshMenu(true)"
+          >
+            <ZButton
+              size="medium"
+              :disabled="loading || importing || batchRunning"
+              @click="loadEngines"
             >
-              <ChevronDown :size="15" />
-            </button>
-            <Transition name="dropdown">
-              <div v-if="showCreateMenu" class="create-dropdown" @click.stop>
-                <button class="create-dropdown-item" :disabled="importing" @click="pickImportFile">
-                  <Download :size="15" />
-                  <span>{{ importing ? '导入中...' : '导入旧数据' }}</span>
-                </button>
-              </div>
-            </Transition>
+              <template #icon>
+                <RotateCw :size="15" />
+              </template>
+              刷新
+            </ZButton>
+            <ZButton
+              class="refresh-arrow"
+              size="medium"
+              title="刷新选项"
+              aria-label="刷新选项"
+              aria-haspopup="menu"
+              :aria-expanded="refreshMenuOpen"
+              :disabled="loading || importing || batchRunning"
+              @click="toggleRefreshMenu"
+              @keydown.down.prevent="toggleRefreshMenu"
+            >
+              <ChevronDown :size="14" />
+            </ZButton>
+            <div
+              v-if="refreshMenuOpen"
+              class="create-dropdown refresh-menu"
+              role="menu"
+              aria-label="刷新选项"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                class="create-dropdown-item"
+                @click="startBatchIcons"
+                @keydown.down.prevent
+                @keydown.up.prevent
+                @keydown.tab="closeRefreshMenu()"
+              >
+                批量获取网页图标
+              </button>
+            </div>
           </div>
+          <ZButton size="medium" type="primary" @click="() => openAddEditor()">
+            <template #icon>
+              <Plus :size="15" />
+            </template>
+            添加
+          </ZButton>
+          <ZButton
+            size="medium"
+            :disabled="loading || importing || batchRunning"
+            @click="pickImportFile"
+          >
+            <template #icon>
+              <Upload :size="15" />
+            </template>
+            {{ importing ? '导入中...' : '导入' }}
+          </ZButton>
+          <ZButton
+            size="medium"
+            :disabled="loading || exporting || engines.length === 0"
+            @click="exportEngines"
+          >
+            <template #icon>
+              <Download :size="15" />
+            </template>
+            {{ exporting ? '导出中...' : '导出' }}
+          </ZButton>
           <input
             ref="importFileInput"
             type="file"
@@ -550,61 +1256,329 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="content-area">
-        <div v-if="loading" class="state-panel">加载中...</div>
-        <div v-else-if="filteredEngines.length === 0" class="state-panel">
-          <Search :size="26" />
-          <span>{{ emptyText }}</span>
-        </div>
-        <div v-else class="engine-list">
-          <article v-for="engine in filteredEngines" :key="engine.id" class="engine-card">
-            <div class="engine-main">
-              <div class="engine-icon">
-                <img v-if="engine.icon" :src="engine.icon" alt="" />
-                <Globe v-else :size="20" />
+      <div v-if="batchTask" class="batch-icon-progress" role="status" aria-live="polite">
+        <span v-if="batchRunning"
+          >{{ batchTask.status === 'cancelling' ? '正在取消' : '获取图标' }}：已处理
+          {{ batchTask.processed }} / {{ batchTask.total }}</span
+        >
+        <span v-else
+          >{{
+            batchTask.status === 'cancelled'
+              ? '已取消'
+              : batchTask.status === 'failed'
+                ? '任务失败'
+                : '图标获取完成'
+          }}：更新 {{ batchTask.updated }}，失败 {{ batchTask.failed }}，跳过
+          {{ batchTask.skipped }}</span
+        >
+        <ZButton
+          v-if="batchRunning"
+          size="small"
+          :disabled="batchTask.status === 'cancelling'"
+          @click="cancelBatchIcons"
+          >取消</ZButton
+        >
+        <button
+          v-else
+          class="icon-button"
+          aria-label="关闭图标任务结果"
+          title="关闭"
+          @click="dismissBatchIcons"
+        >
+          ×
+        </button>
+      </div>
+      <div class="manager-layout">
+        <aside class="group-sidebar" :class="{ 'editing-group': groupDialogMode }">
+          <nav class="group-nav" aria-label="入口分组">
+            <button
+              class="group-nav-item"
+              :class="{ active: selectedGroup === ALL_GROUPS }"
+              type="button"
+              @click="selectedGroup = ALL_GROUPS"
+            >
+              <span>{{ ALL_GROUPS }}</span>
+              <span class="group-count">{{ engines.length }}</span>
+            </button>
+            <button
+              class="group-nav-item"
+              :class="{ active: selectedGroup === DEFAULT_GROUP }"
+              type="button"
+              @click="selectedGroup = DEFAULT_GROUP"
+            >
+              <span>{{ DEFAULT_GROUP }}</span>
+              <span class="group-count">{{ groupCounts.get(DEFAULT_GROUP) || 0 }}</span>
+            </button>
+            <button
+              v-for="group in groups"
+              :key="group"
+              class="group-nav-item"
+              :class="{ active: selectedGroup === group }"
+              type="button"
+              @click="selectedGroup = group"
+            >
+              <span>{{ group }}</span>
+              <span class="group-count">{{ groupCounts.get(group) || 0 }}</span>
+            </button>
+          </nav>
+
+          <div class="group-sidebar-footer">
+            <div v-if="groupDialogMode" class="group-editor" @keydown.enter.prevent="saveGroupName">
+              <ZInput
+                v-model="groupNameInput"
+                size="small"
+                :placeholder="groupDialogMode === 'rename' ? '修改分组名称' : '新分组名称'"
+              />
+              <div class="group-editor-actions">
+                <ZButton size="small" type="primary" @click="saveGroupName">保存</ZButton>
+                <ZButton size="small" @click="cancelGroupDialog">取消</ZButton>
               </div>
-              <div class="engine-text">
-                <div class="engine-heading">
-                  <h2>{{ engine.name }}</h2>
-                  <ZTag :type="engine.type === 'webpage' ? 'success' : 'info'" size="small">
-                    {{ engine.type === 'webpage' ? '网页' : '搜索' }}
-                  </ZTag>
+            </div>
+            <div class="group-tools">
+              <button
+                class="icon-button"
+                type="button"
+                title="新增分组"
+                aria-label="新增分组"
+                @click="startCreateGroup"
+              >
+                <Plus :size="16" />
+              </button>
+              <button
+                class="icon-button"
+                type="button"
+                :title="isUserGroupSelected ? '修改分组' : '请选择自定义分组后修改'"
+                aria-label="修改分组"
+                :disabled="!isUserGroupSelected"
+                @click="startRenameGroup"
+              >
+                <Pencil :size="15" />
+              </button>
+              <button
+                class="icon-button danger"
+                type="button"
+                :title="isUserGroupSelected ? '删除分组' : '请选择自定义分组后删除'"
+                aria-label="删除分组"
+                :disabled="!isUserGroupSelected"
+                @click="deleteSelectedGroup"
+              >
+                <Trash2 :size="15" />
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <div class="content-area">
+          <div v-if="loading" class="state-panel">加载中...</div>
+          <div v-else-if="filteredEngines.length === 0" class="state-panel">
+            <Search :size="26" />
+            <span>{{ emptyText }}</span>
+            <ZButton v-if="selectedGroup !== ALL_GROUPS" size="small" @click="openAddEditor()"
+              >添加入口</ZButton
+            >
+          </div>
+          <div v-else class="engine-list">
+            <article v-for="engine in filteredEngines" :key="engine.id" class="engine-card">
+              <div class="engine-main">
+                <div class="engine-icon">
+                  <img v-if="engine.icon" :src="engine.icon" alt="" />
+                  <Globe v-else :size="20" />
                 </div>
-                <p>{{ engine.url }}</p>
-                <span v-if="engine.type === 'webpage' && engine.keyword">
-                  匹配关键字：{{ engine.keyword }}
-                </span>
+                <div class="engine-text">
+                  <div class="engine-heading">
+                    <h2>{{ engine.name }}</h2>
+                    <ZTag :type="engine.type === 'webpage' ? 'success' : 'info'" size="small">
+                      {{ engine.type === 'webpage' ? '网页' : '搜索' }}
+                    </ZTag>
+                  </div>
+                  <p>{{ engine.url }}</p>
+                  <span v-if="engine.type === 'webpage' && engine.keyword">
+                    匹配关键字：{{ engine.keyword }}
+                  </span>
+                </div>
+              </div>
+              <div class="engine-actions">
+                <ZSwitch
+                  :model-value="engine.enabled"
+                  size="small"
+                  @update:model-value="(value: boolean) => toggleEnabled(engine, value)"
+                />
+                <button class="icon-button" title="试开" @click="openPreview(engine)">
+                  <ExternalLink :size="16" />
+                </button>
+                <button class="icon-button" title="编辑" @click="openEditEditor(engine)">
+                  <Pencil :size="16" />
+                </button>
+                <button class="icon-button danger" title="删除" @click="deleteEngine(engine)">
+                  <Trash2 :size="16" />
+                </button>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section v-else-if="showBrowserManager" class="browser-manager-view">
+      <header class="editor-header">
+        <button class="icon-button" title="返回" @click="closeBrowserManager">
+          <ArrowLeft :size="17" />
+        </button>
+        <div>
+          <h1>浏览器管理</h1>
+          <p>集中维护浏览器路径和启动参数，入口只保存配置引用</p>
+        </div>
+      </header>
+      <div class="toolbar browser-manager-toolbar">
+        <ZInput v-model="browserProfileQuery" type="search" clearable placeholder="搜索浏览器配置">
+          <template #prefix><Search :size="16" /></template>
+        </ZInput>
+        <div class="toolbar-actions">
+          <ZButton size="medium" @click="resetBrowserProfiles">
+            <template #icon><RotateCw :size="15" /></template>
+            恢复默认
+          </ZButton>
+          <ZButton size="medium" type="primary" @click="openNewBrowserProfile">
+            <template #icon><Plus :size="15" /></template>
+            新增
+          </ZButton>
+        </div>
+      </div>
+      <div class="browser-manager-content">
+        <div v-if="filteredBrowserProfiles.length === 0" class="state-panel">暂无浏览器配置</div>
+        <div v-else class="browser-profile-list">
+          <article
+            v-for="profile in filteredBrowserProfiles"
+            :key="profile.id"
+            class="engine-card browser-profile-card"
+          >
+            <div class="engine-icon browser-profile-icon">
+              <img
+                v-if="isBrowserImage(profile.icon)"
+                :src="profile.icon"
+                alt=""
+                @error="brokenBrowserIcons.add(profile.icon)"
+              />
+              <Globe v-else :size="24" />
+            </div>
+            <div class="browser-profile-main">
+              <div class="engine-heading">
+                <h2>{{ profile.name }}</h2>
+              </div>
+              <div class="browser-profile-details">
+                <span :title="profile.path">{{ profile.path }}</span>
+                <code :title="stringifyBrowserArgs(profile.args)">{{
+                  stringifyBrowserArgs(profile.args)
+                }}</code>
               </div>
             </div>
             <div class="engine-actions">
-              <ZSwitch
-                :model-value="engine.enabled"
-                size="small"
-                @update:model-value="(value: boolean) => toggleEnabled(engine, value)"
-              />
-              <button class="icon-button" title="试开" @click="openPreview(engine)">
-                <ExternalLink :size="16" />
-              </button>
-              <button class="icon-button" title="编辑" @click="openEditEditor(engine)">
+              <button class="icon-button" title="编辑" @click="editBrowserProfile(profile)">
                 <Pencil :size="16" />
               </button>
-              <button class="icon-button danger" title="删除" @click="deleteEngine(engine)">
+              <button class="icon-button" title="复制" @click="copyBrowserProfile(profile)">
+                <Plus :size="16" />
+              </button>
+              <button
+                class="icon-button"
+                :class="{ danger: !profile.builtin }"
+                :title="profile.builtin ? (profile.hidden ? '显示预设' : '隐藏预设') : '删除'"
+                @click="deleteBrowserProfile(profile)"
+              >
                 <Trash2 :size="16" />
               </button>
             </div>
           </article>
         </div>
       </div>
+      <div v-if="browserProfileDialog" class="browser-profile-dialog">
+        <div class="browser-profile-dialog-card">
+          <h2>
+            {{ editingBrowserProfileId ? '编辑浏览器配置' : '新增浏览器配置' }}
+          </h2>
+          <div class="form-field">
+            <label>名称</label
+            ><ZInput v-model="browserProfileForm.name" placeholder="例如：Chrome 隐私模式打开" />
+          </div>
+          <div class="form-field">
+            <label>图标</label>
+            <div class="icon-editor">
+              <div class="icon-preview">
+                <img
+                  v-if="isBrowserImage(browserProfileForm.icon)"
+                  :src="browserProfileForm.icon"
+                  alt=""
+                  @error="brokenBrowserIcons.add(browserProfileForm.icon)"
+                />
+                <Globe v-else :size="24" />
+              </div>
+              <ZButton
+                size="small"
+                :loading="fetchingBrowserIcon"
+                :disabled="!browserProfileForm.path"
+                @click="fetchBrowserProfileIcon"
+              >
+                <template #icon><Download :size="14" /></template>
+                自动获取
+              </ZButton>
+              <ZButton size="small" @click="browserIconFileInput?.click()">
+                <template #icon><Upload :size="14" /></template>
+                上传
+              </ZButton>
+              <input
+                ref="browserIconFileInput"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon"
+                class="file-input"
+                @change="handleBrowserIconFileChange"
+              />
+            </div>
+            <p class="hint">从指定程序提取图标，最多等待 2 秒，也可上传不超过 1 MB 的图片</p>
+          </div>
+          <div class="form-field">
+            <label>启动路径</label>
+            <div class="browser-path-row">
+              <ZInput
+                v-model="browserProfileForm.path"
+                placeholder="chrome.exe 或完整路径"
+              /><ZButton size="small" @click="pickBrowserExecutableForProfile">选择程序</ZButton>
+            </div>
+          </div>
+          <div class="form-field">
+            <label>启动参数</label
+            ><ZInput
+              :model-value="stringifyBrowserArgs(browserProfileForm.args)"
+              @update:model-value="
+                (value) => (browserProfileForm.args = parseBrowserArgs(String(value)))
+              "
+              placeholder="--incognito {url}"
+            />
+            <p class="hint">使用 {url} 作为网址占位符，不填写时自动追加到末尾</p>
+          </div>
+          <div class="browser-command-preview">
+            <code>{{ browserCommandPreview(browserProfileForm) }}</code
+            ><ZButton size="small" :loading="testingBrowserProfile" @click="testBrowserProfile"
+              >测试打开</ZButton
+            >
+          </div>
+          <footer class="editor-footer">
+            <ZButton @click="cancelBrowserProfile">取消</ZButton
+            ><ZButton type="primary" @click="saveBrowserProfile">保存</ZButton>
+          </footer>
+        </div>
+      </div>
     </section>
 
-    <section v-else class="editor-view">
+    <section v-else-if="showEditor" class="editor-view">
       <header class="editor-header">
         <button class="icon-button" title="返回" @click="closeEditor">
           <ArrowLeft :size="17" />
         </button>
         <div>
           <h1>{{ isEditing ? '编辑入口' : '添加入口' }}</h1>
-          <p>{{ isWebpage ? '输入关键字直接打开网页' : '把搜索词填入 URL 模板' }}</p>
+          <p>
+            {{ isWebpage ? '输入关键字直接打开网页' : '把搜索词填入 URL 模板' }}
+          </p>
         </div>
       </header>
 
@@ -679,6 +1653,39 @@ onUnmounted(() => {
           </p>
         </div>
 
+        <div class="form-grid">
+          <div class="form-field">
+            <label>分组</label>
+            <DownSelect
+              :model-value="formData.group ?? 0"
+              :options="[
+                { label: DEFAULT_GROUP, value: 0 },
+                ...groups.map((group) => ({ label: group, value: group }))
+              ]"
+              @update:model-value="
+                (value) => (formData.group = typeof value === 'string' && value ? value : null)
+              "
+            />
+          </div>
+          <div class="form-field browser-select-field">
+            <label>打开方式</label>
+            <div class="browser-select-row">
+              <DownSelect
+                :model-value="formData.browserId ?? 0"
+                :options="browserSelectOptions"
+                @update:model-value="
+                  (value) =>
+                    (formData.browserId = typeof value === 'string' && value ? value : null)
+                "
+              />
+              <ZButton size="small" @click="openBrowserManager">管理浏览器</ZButton>
+            </div>
+            <p v-if="formData.browserId && !selectedBrowserProfile" class="hint warning-hint">
+              未找到对应浏览器配置，已降级为系统默认浏览器
+            </p>
+          </div>
+        </div>
+
         <div class="form-field">
           <label>图标</label>
           <div class="icon-editor">
@@ -686,7 +1693,12 @@ onUnmounted(() => {
               <img v-if="formData.icon" :src="formData.icon" alt="" />
               <Globe v-else :size="24" />
             </div>
-            <ZButton size="small" :loading="fetchingIcon" :disabled="!formData.url" @click="fetchFavicon">
+            <ZButton
+              size="small"
+              :loading="fetchingIcon"
+              :disabled="!formData.url"
+              @click="fetchFavicon"
+            >
               <template #icon>
                 <Download :size="14" />
               </template>
