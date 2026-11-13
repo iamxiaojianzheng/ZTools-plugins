@@ -5,7 +5,7 @@
   "pluginName": "EasyNssm 服务管理",
   "description": "nssm 的友好图形界面：安装/编辑/卸载 nssm 服务、查看服务日志；同时支持系统服务的查看与启停",
   "author": "咖啡八杯",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "pluginType": "ui",
   "main": "index.html",
   "preload": "preload.js",
