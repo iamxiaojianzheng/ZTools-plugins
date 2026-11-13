@@ -2,6 +2,10 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import tooltip from './directives/tooltip.js'
 import './styles.css'
+import { initializeHostRuntime } from './services/host/index.js'
+
+// 初始化宿主运行时适配层（自动感知 ZTools / Ruck / Web 模式）
+initializeHostRuntime()
 
 // 页面挂载前关闭历史滚动恢复，避免开发 URL 重载时 Chromium 覆盖会话控制器的贴底位置。
 if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {

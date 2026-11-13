@@ -1,13 +1,25 @@
 {
   "name": "vibe-coding",
+  "pluginType": "ui",
   "title": "Vibe Coding",
-  "description": "全能 AI 助手，支持对话、网页搜索、工具调用与 ZTools 插件开发",
+  "description": "全能 AI 助手，支持对话、网页搜索、工具调用、本地大模型与开发能力",
   "version": "0.1.3",
   "main": "index.html",
   "preload": "preload.js",
   "logo": "logo.png",
   "author": "Zing",
   "platform": ["win32", "darwin", "linux"],
+  "permissions": [
+    "file_system_read",
+    "file_system_write",
+    "shell_execute",
+    "network_access",
+    "clipboard_write",
+    "window_control",
+    "notification",
+    "ai_chat",
+    "system_info"
+  ],
   "pluginSetting": {
     "single": true
   },

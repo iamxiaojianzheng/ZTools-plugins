@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Cpu,
 } from "@lucide/vue";
 
 const props = defineProps({
@@ -14,7 +15,7 @@ const props = defineProps({
   reasoningOptions: { type: Array, default: () => [] },
   reasoningValue: { type: String, default: "" },
 });
-const emit = defineEmits(["update:modelValue", "update:reasoningValue"]);
+const emit = defineEmits(["update:modelValue", "update:reasoningValue", "openLocalModal"]);
 const root = ref(null);
 const trigger = ref(null);
 const options = ref(null);
@@ -31,9 +32,10 @@ const selectedReasoning = computed(
       (option) => option.value === props.reasoningValue,
     ) || null,
 );
-const triggerModelLabel = computed(
-  () => selectedModel.value?.model || selectedModel.value?.label || "选择模型",
-);
+const triggerModelLabel = computed(() => {
+  if (!props.modelOptions.length) return "未配置模型 (点击配置)";
+  return selectedModel.value?.label || selectedModel.value?.model || "选择模型";
+});
 const triggerReasoningLabel = computed(
   () => selectedReasoning.value?.label || "",
 );
@@ -43,7 +45,10 @@ const triggerReasoningLabel = computed(
  * @returns {void} 无返回值。
  */
 function toggleMenu() {
-  if (!props.modelOptions.length) return;
+  if (!props.modelOptions.length) {
+    emit("openLocalModal");
+    return;
+  }
   open.value = !open.value;
   if (open.value) view.value = "overview";
 }
@@ -130,11 +135,11 @@ onBeforeUnmount(() => {
     <button
       ref="trigger"
       class="model-reasoning-trigger"
+      :class="{ 'is-empty': !modelOptions.length }"
       type="button"
       aria-label="选择模型和推理等级"
       aria-haspopup="dialog"
       :aria-expanded="open"
-      :disabled="!modelOptions.length"
       :data-model-value="modelValue"
       :data-reasoning-value="reasoningValue"
       @click="toggleMenu"
@@ -174,6 +179,15 @@ onBeforeUnmount(() => {
           <span>推理等级</span>
           <strong>{{ triggerReasoningLabel }}</strong>
           <ChevronRight :size="16" />
+        </button>
+        <button
+          class="model-reasoning-row local-manage-row"
+          type="button"
+          aria-label="配置本地大模型"
+          @click="emit('openLocalModal'); closeMenu(false)"
+        >
+          <span>配置本地大模型 (Ollama)</span>
+          <Cpu :size="15" />
         </button>
       </div>
 
@@ -217,6 +231,15 @@ onBeforeUnmount(() => {
               "
               :size="16"
             />
+          </button>
+          <button
+            v-if="view === 'models'"
+            class="model-reasoning-option local-add-option"
+            type="button"
+            @click="emit('openLocalModal'); closeMenu(false)"
+          >
+            <Cpu :size="14" />
+            <span>+ 配置本地大模型 (Ollama)</span>
           </button>
         </div>
       </template>

@@ -82,3 +82,25 @@ flowchart TD
 - `ImagePalettePage` / `utils/color.ts` 内部通过 Canvas 渲染色卡，输出为 Base64 Data URL；
 - 原逻辑在 Node 环境下通过 `Buffer.from` + `fs.writeFile` 落盘；
 - **Ruck 沙箱重构点**：在 Webview2 浏览器无 Node.js 全局环境下，垫片层需剥离 Node 原生依赖，改用 Web Blob + 对象 URL 或 Ruck 宿主对话框/文件保存通道进行无感导出。
+
+---
+
+## 5. v1.1.0 架构演进与 Ruck 适配成果
+
+在完成与上游 `main` 分支（PR #642 v1.1.0）合并后，架构能力实现全面升级：
+
+1. **构建与依赖链现代化**：升级至 Vite 8、React 19、MUI 7 与 Chroma.js 3，建立基于 Vitest 的全套单元测试规范。
+2. **构建流水线融合**：`package.json` 中的 `build` 与 `dev` 串联了 `node build-compat.js`，保证任何构建前垫片层 `src-compat/` 自动打包输出到 `public/preload.js` 与根目录 `preload.js`。
+3. **输入正则与命令边界加固**：
+   - 彻底修复大小写依赖与英文单词误匹配，匹配模式全面内置（`[rR][gG][bB]`、`[a-fA-F0-9]`）；
+   - 移除 `ai` 冗余的正则捕获，收敛入驻入口；
+   - 保证 `preserveFlags: false` 边打边搜场景与快捷键粘贴判定完全一致。
+4. **多端桥接与数据契约统一**：
+   - `utils/platform.ts` 保留 `getPlatform()` 动态解析多宿主（`window.platform` / `window.ztools` / `window.utools` / `window.ruck`）；
+   - `db.put()` 与 `db.remove()` 保持平台分支与降级分支严格一致的对象形状（`{ ok, id, rev, error }`），保障调用层透明无感；
+   - 强化 `copyTextFallback` 机制，接住 Promise 异步 reject 与非安全上下文。
+5. **UI 与交互体验提升**：
+   - `GradientsPage`、`ImagePalettePage`、`AIPalettePage` 采用 `React.lazy` 按需加载；
+   - AI 图片色卡升级为全新自适应版式，配合 AI 起名状态机；
+   - 复制提示条与星标收藏状态打通，支持即时响应与跨页刷新。
+

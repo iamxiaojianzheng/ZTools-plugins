@@ -6,7 +6,11 @@
 export async function writeClipboard(text) {
   const content = String(text ?? '')
   try {
-    // ZTools 插件优先使用宿主能力，避免受 WebContents 安全上下文限制。
+    // 优先使用 Ruck / ZTools 宿主剪贴板能力，避免受 Webview 安全上下文限制。
+    if (typeof window.ruck?.clipboard?.writeText === 'function') {
+      await Promise.resolve(window.ruck.clipboard.writeText(content))
+      return true
+    }
     if (typeof window.ztools?.copyText === 'function') {
       await Promise.resolve(window.ztools.copyText(content))
       return true

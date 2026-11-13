@@ -11,7 +11,7 @@
     "test": "node --test scripts/*.test.js",
     "test:ruck-publish": "node --test scripts/publish-ruck-plugin.test.js",
     "test:package-manager": "node --test scripts/package-manager.test.js",
-    "test:manifest": "node --test scripts/generate-plugins-json.test.js",
+    "test:manifest": "node --test scripts/generate-plugins-json.test.js scripts/remove-plugins.test.js",
     "clean:plugins-node-modules": "node scripts/clean-plugin-node-modules.js",
     "generate": "node scripts/generate-plugins-json.js",
     "release:ruck": "node scripts/publish-ruck-plugin.js"

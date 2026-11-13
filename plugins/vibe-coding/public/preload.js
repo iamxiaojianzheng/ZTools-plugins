@@ -1,3 +1,9 @@
+(function () {
+  if (typeof require === "undefined") {
+    // 处于纯前端沙箱或 Ruck Webview 环境，无需执行 Node.js preload，由运行时适配器接管
+    return;
+  }
+
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
@@ -2364,3 +2370,4 @@ window.ztools?.onPluginOut?.(() => {
   localToolRuntime?.cancelAll();
   cleanupBackgroundProcesses();
 });
+})();

@@ -17,6 +17,7 @@ import {
   ChevronUp,
   Circle,
   Ellipsis,
+  ExternalLink,
   Files,
   Folder,
   FolderOpen,
@@ -31,6 +32,7 @@ import {
   Settings,
   Square,
   Terminal,
+  Trash2,
   Wrench,
   X,
 } from "@lucide/vue";
@@ -47,6 +49,7 @@ import ReasoningPanel from "./components/ReasoningPanel.vue";
 import ToolCall from "./components/ToolCall.vue";
 import WorkspaceHoverCard from "./components/WorkspaceHoverCard.vue";
 import WorkspacePicker from "./components/WorkspacePicker.vue";
+import LocalModelModal from "./components/LocalModelModal.vue";
 import {
   DEFAULT_CONTEXT_POLICY,
   analyzeCompactionCandidate,
@@ -144,6 +147,13 @@ const isZToolsVersionUnsupported = computed(
 
 async function checkZToolsVersion() {
   try {
+    // Ruck 运行时环境直接放行，无需且不应校验 ZTools 宿主版本
+    if (typeof window !== "undefined" && (window.ruck || window.zvcBridge?.isRuck)) {
+      ztoolsVersion.value = "Ruck Native";
+      ztoolsVersionSupported.value = true;
+      return;
+    }
+
     const getAppVersion = window.ztools?.getAppVersion;
     if (typeof getAppVersion !== "function") {
       throw new Error("ZTools getAppVersion API is unavailable");
@@ -260,10 +270,16 @@ const sidebarWidth = ref(220);
 const sidebarResizing = ref(false);
 const sidebarNow = ref(Date.now());
 const conversationMenu = ref(null);
+const workspaceMenu = ref(null);
+const removeWorkspaceConfirmTarget = ref(null);
+const removingWorkspace = ref(false);
+const deleteConversationConfirmTarget = ref(null);
+const deletingConversation = ref(false);
 const conversationRenameTarget = ref(null);
 const conversationRenameDraft = ref("");
 const conversationRenameError = ref("");
 const conversationRenaming = ref(false);
+const localModelModalOpen = ref(false);
 const renameIsComposing = ref(false);
 const error = bindActiveRuntimeField("error");
 const isComposing = ref(false);
@@ -473,6 +489,78 @@ function sortConversationsByUpdatedAt(items) {
 }
 
 /**
+ * 关闭当前工作区行的操作菜单。
+ * @returns {void} 无返回值。
+ */
+function closeWorkspaceMenu() {
+  workspaceMenu.value = null;
+}
+
+/**
+ * 根据三点按钮位置打开工作区操作菜单，并避免菜单超出窗口边界。
+ * @param {Record<string, unknown>} workspace 目标工作区。
+ * @param {MouseEvent} event 按钮点击事件。
+ * @returns {void} 无返回值。
+ */
+function openWorkspaceMenu(workspace, event) {
+  closeConversationMenu();
+  const rect = event.currentTarget?.getBoundingClientRect?.();
+  if (!rect) return;
+  const width = 184;
+  const height = 96;
+  const margin = 8;
+  let left = rect.right + 6;
+  if (left + width > window.innerWidth - margin)
+    left = Math.max(margin, rect.left - width - 6);
+  const top = Math.min(
+    Math.max(margin, rect.bottom + 4),
+    Math.max(margin, window.innerHeight - height - margin),
+  );
+  workspaceMenu.value = { workspaceId: workspace.id, workspace, left, top };
+}
+
+/**
+ * 处理工作区菜单指令
+ * @param {'open'|'remove'} action 操作类型
+ */
+async function handleWorkspaceMenuAction(action) {
+  const ws = workspaceMenu.value?.workspace;
+  closeWorkspaceMenu();
+  if (!ws) return;
+  if (action === "open") {
+    if (ws.id && bridge?.openWorkspace) {
+      await bridge.openWorkspace(ws.id);
+    } else if (ws.path && bridge?.openPath) {
+      await bridge.openPath(ws.path);
+    }
+  } else if (action === "remove") {
+    removeWorkspaceConfirmTarget.value = ws;
+  }
+}
+
+function closeRemoveWorkspaceConfirm(force = false) {
+  if (removingWorkspace.value && !force) return;
+  removeWorkspaceConfirmTarget.value = null;
+}
+
+async function executeRemoveWorkspace(workspace) {
+  if (!workspace || removingWorkspace.value) return;
+  removingWorkspace.value = true;
+  try {
+    await bridge?.removeWorkspace?.(workspace.id);
+    workspaces.value = workspaces.value.filter((w) => w.id !== workspace.id);
+    if (activeWorkspaceId.value === workspace.id) {
+      activeWorkspaceId.value = "";
+    }
+    removeWorkspaceConfirmTarget.value = null;
+  } catch (err) {
+    error.value = `移除工作区失败: ${err?.message || err}`;
+  } finally {
+    removingWorkspace.value = false;
+  }
+}
+
+/**
  * 关闭当前会话行的操作菜单。
  * @returns {void} 无返回值。
  */
@@ -617,9 +705,40 @@ async function archiveConversationItem(conversation) {
   else newConversation();
 }
 
+function openDeleteConversationConfirm(conversation) {
+  closeConversationMenu();
+  deleteConversationConfirmTarget.value = conversation;
+}
+
+function closeDeleteConversationConfirm(force = false) {
+  if (deletingConversation.value && !force) return;
+  deleteConversationConfirmTarget.value = null;
+}
+
+async function executeDeleteConversation(conversation) {
+  if (!conversation || deletingConversation.value) return;
+  deletingConversation.value = true;
+  try {
+    await bridge?.removeConversation?.(conversation.id);
+    conversations.value = conversations.value.filter(
+      (item) => item.id !== conversation.id,
+    );
+    if (conversation.id === activeConversationId.value) {
+      const next = conversations.value[0];
+      if (next) await selectConversation(next.id);
+      else newConversation();
+    }
+    deleteConversationConfirmTarget.value = null;
+  } catch (err) {
+    error.value = `删除会话失败: ${err?.message || err}`;
+  } finally {
+    deletingConversation.value = false;
+  }
+}
+
 /**
  * 分派当前会话菜单操作，并在执行前验证目标仍位于普通会话列表。
- * @param {'rename'|'fork'|'archive'} action 菜单操作标识。
+ * @param {'rename'|'fork'|'archive'|'delete'} action 菜单操作标识。
  * @returns {Promise<void>} 菜单操作处理完成后的 Promise。
  */
 async function handleConversationMenuAction(action) {
@@ -633,6 +752,7 @@ async function handleConversationMenuAction(action) {
   if (action === "rename") openConversationRename(conversation);
   else if (action === "fork") await forkConversationItem(conversation);
   else if (action === "archive") await archiveConversationItem(conversation);
+  else if (action === "delete") openDeleteConversationConfirm(conversation);
 }
 
 /**
@@ -3372,32 +3492,32 @@ async function executeConversationTurn(runtime, submission) {
   runtime.activeTurnId = turnId;
   // 新 Turn 先清除上一轮的读数，压缩或准备阶段不展示过期 token 统计。
   resetTurnTokenStats(runtime);
-  await ensureExecutionMessages(runtime);
-  // 与 Harness 的 standing plan 一致，新一轮开始时清除上一轮任务投影。
-  runtime.tasks = [];
-  // 正式领取时保留用户最初提交时间，不让排队等待改写消息时间。
-  const userMessage = createUserMessageFromSubmission(submission, turnId);
-  // 第一条用户消息提交时冻结工作区状态，避免后续工具在不同目录中继续同一历史。
-  runtime.workspaceLocked = true;
-  appendRuntimeMessage(runtime, userMessage);
-  const conversation = conversations.value.find(
-    (item) => item.id === runtime.id,
-  );
-  if (conversation?.title === "新的对话") {
-    const text = String(submission.text || "");
-    const attachmentCount = Array.isArray(submission.attachments)
-      ? submission.attachments.length
-      : 0;
-    const title =
-      text.replace(/\s+/g, " ").slice(0, 42) ||
-      (attachmentCount === 1 ? "图片对话" : `${attachmentCount} 张图片`);
-    bridge?.updateConversation(runtime.id, { title });
-    conversations.value = conversations.value.map((item) =>
-      item.id === runtime.id ? { ...item, title } : item,
-    );
-  }
-  await persistConversation(runtime);
   try {
+    await ensureExecutionMessages(runtime);
+    // 与 Harness 的 standing plan 一致，新一轮开始时清除上一轮任务投影。
+    runtime.tasks = [];
+    // 正式领取时保留用户最初提交时间，不让排队等待改写消息时间。
+    const userMessage = createUserMessageFromSubmission(submission, turnId);
+    // 第一条用户消息提交时冻结工作区状态，避免后续工具在不同目录中继续同一历史。
+    runtime.workspaceLocked = true;
+    appendRuntimeMessage(runtime, userMessage);
+    const conversation = conversations.value.find(
+      (item) => item.id === runtime.id,
+    );
+    if (conversation?.title === "新的对话") {
+      const text = String(submission.text || "");
+      const attachmentCount = Array.isArray(submission.attachments)
+        ? submission.attachments.length
+        : 0;
+      const title =
+        text.replace(/\s+/g, " ").slice(0, 42) ||
+        (attachmentCount === 1 ? "图片对话" : `${attachmentCount} 张图片`);
+      bridge?.updateConversation(runtime.id, { title });
+      conversations.value = conversations.value.map((item) =>
+        item.id === runtime.id ? { ...item, title } : item,
+      );
+    }
+    await persistConversation(runtime);
     await runAssistantLoop(runtime, turnId);
     // 停止流程会让循环提前正常返回，仅仍处于生成状态的完整 Turn 才发布尾部时间。
     if (runtime.busy) completeAssistantTurn(runtime, turnId);
@@ -3464,8 +3584,18 @@ async function runConversationScheduler(runtime, initialSubmission = null) {
  * @returns {Promise<void>|null} 当前调度 Promise；会话暂不可调度时返回 null。
  */
 function startConversationScheduler(runtime, initialSubmission = null) {
+  if (!runtime?.id) {
+    console.warn("[ZVC scheduler] 会话运行时缺少有效 ID，尝试根据当前激活会话修复:", activeConversationId.value);
+    if (activeConversationId.value && conversationRuntimes.has(activeConversationId.value)) {
+      runtime = conversationRuntimes.get(activeConversationId.value);
+    }
+    if (!runtime?.id) {
+      console.error("[ZVC scheduler] 启动失败：当前会话运行时未有效登记");
+      error.value = "当前会话状态异常，请点击左侧会话或新建会话后重试。";
+      return null;
+    }
+  }
   if (
-    !runtime?.id ||
     runtime.operationPromise ||
     runtime.busy ||
     runtime.compacting
@@ -3501,13 +3631,18 @@ function startConversationScheduler(runtime, initialSubmission = null) {
  */
 function sendMessage(mode = busySubmissionMode.value) {
   if (!canSend.value) {
-    if (!selectedModelOption.value)
-      error.value = "请先在 ZTools 设置中添加并启用 AI 模型。";
+    if (!selectedModelOption.value) {
+      error.value = "请先配置并选择可用的 AI 模型（点击下方模型选择器配置）。";
+      localModelModalOpen.value = true;
+    }
     return undefined;
   }
-  const runtime = activeRuntime.value;
+  let runtime = activeRuntime.value;
+  if (!runtime?.id && activeConversationId.value && conversationRuntimes.has(activeConversationId.value)) {
+    runtime = conversationRuntimes.get(activeConversationId.value);
+  }
   const running = Boolean(
-    runtime.busy || runtime.compacting || runtime.operationPromise,
+    runtime?.busy || runtime?.compacting || runtime?.operationPromise,
   );
   const steeringAvailable = runtime.busy && !runtime.compacting;
   const placement =
@@ -3850,6 +3985,7 @@ onMounted(async () => {
   }, 60_000);
   window.addEventListener("resize", resizeComposerInput);
   window.addEventListener("resize", closeConversationMenu);
+  window.addEventListener("resize", closeWorkspaceMenu);
   document.addEventListener("pointerdown", closeSubmissionModeMenu);
   window.ztools?.onPluginEnter?.(() => {});
 });
@@ -3874,6 +4010,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", resizeComposerInput);
   document.removeEventListener("pointerdown", closeSubmissionModeMenu);
   window.removeEventListener("resize", closeConversationMenu);
+  window.removeEventListener("resize", closeWorkspaceMenu);
 });
 </script>
 
@@ -3935,6 +4072,18 @@ onBeforeUnmount(() => {
                 @click.stop="newConversation(group.workspace.id)"
               >
                 <Plus :size="14" />
+              </button>
+              <button
+                class="workspace-group-more"
+                :class="{
+                  'menu-open': workspaceMenu?.workspaceId === group.workspace.id,
+                }"
+                type="button"
+                v-tooltip.bottom="'工作区操作'"
+                aria-label="工作区操作"
+                @click.stop="openWorkspaceMenu(group.workspace, $event)"
+              >
+                <Ellipsis :size="14" />
               </button>
             </div>
           </WorkspaceHoverCard>
@@ -4337,6 +4486,26 @@ onBeforeUnmount(() => {
             @remove="deletePendingMessage"
             @steer="promotePendingMessage"
           />
+          <div v-if="error" class="composer-error-banner" role="alert">
+            <Circle :size="14" class="composer-error-icon" />
+            <span class="composer-error-text">{{ error }}</span>
+            <button
+              v-if="error.includes('本地') || error.includes('模型') || error.includes('端点') || error.toLowerCase().includes('llama') || error.includes('Ollama')"
+              class="composer-error-action"
+              type="button"
+              @click="localModelModalOpen = true"
+            >
+              配置本地模型
+            </button>
+            <button
+              class="composer-error-close"
+              type="button"
+              aria-label="关闭提示"
+              @click="error = ''"
+            >
+              <X :size="14" />
+            </button>
+          </div>
           <div
             class="composer"
             :class="{ 'is-image-dragging': composerDraggingImage }"
@@ -4417,6 +4586,7 @@ onBeforeUnmount(() => {
                   :reasoning-value="selectedReasoningEffort"
                   @update:model-value="selectedModel = $event"
                   @update:reasoning-value="selectedReasoningEffort = $event"
+                  @open-local-modal="localModelModalOpen = true"
                 />
                 <ContextMeter
                   :used-tokens="contextMeter.usedTokens"
@@ -4897,7 +5067,157 @@ onBeforeUnmount(() => {
           >
             <Archive :size="18" /><span>归档会话</span>
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="danger-item"
+            @click="handleConversationMenuAction('delete')"
+          >
+            <Trash2 :size="18" /><span>删除会话</span>
+          </button>
         </div>
+      </div>
+
+      <div
+        v-if="workspaceMenu"
+        class="conversation-menu-layer"
+        @mousedown.self="closeWorkspaceMenu"
+      >
+        <div
+          class="conversation-menu"
+          role="menu"
+          :style="{
+            left: `${workspaceMenu.left}px`,
+            top: `${workspaceMenu.top}px`,
+          }"
+          @mousedown.stop
+        >
+          <button
+            type="button"
+            role="menuitem"
+            @click="handleWorkspaceMenuAction('open')"
+          >
+            <ExternalLink :size="18" /><span>在文件管理器打开</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="danger-item"
+            @click="handleWorkspaceMenuAction('remove')"
+          >
+            <Trash2 :size="18" /><span>移除工作区</span>
+          </button>
+        </div>
+      </div>
+
+      <div
+        v-if="removeWorkspaceConfirmTarget"
+        class="modal-backdrop"
+        @mousedown.self="closeRemoveWorkspaceConfirm"
+      >
+        <section
+          class="modal small-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="移除工作区"
+        >
+          <header class="modal-header">
+            <div>
+              <h2>移除工作区</h2>
+              <p>从列表中解除与该工作区的关联。</p>
+            </div>
+            <button
+              class="icon-button"
+              type="button"
+              v-tooltip.bottom="'关闭'"
+              aria-label="关闭"
+              @click="closeRemoveWorkspaceConfirm"
+            >
+              <X :size="19" />
+            </button>
+          </header>
+          <div class="modal-body">
+            <p class="confirm-dialog-text">
+              确定从工作区列表中移除 <strong>{{ removeWorkspaceConfirmTarget.name }}</strong> 吗？
+            </p>
+            <p class="confirm-dialog-tip">
+              💡 提示：此操作仅解除在 Vibe Coding 中的列表登记，<strong>不会删除本地磁盘上的任何实际项目文件</strong>。该工作区下的会话将自动移入“最近会话”列表。
+            </p>
+          </div>
+          <footer class="modal-footer">
+            <button
+              class="button-secondary"
+              type="button"
+              :disabled="removingWorkspace"
+              @click="closeRemoveWorkspaceConfirm"
+            >
+              取消
+            </button>
+            <button
+              class="button-danger"
+              type="button"
+              :disabled="removingWorkspace"
+              @click="executeRemoveWorkspace(removeWorkspaceConfirmTarget)"
+            >
+              {{ removingWorkspace ? "正在移除..." : "确认移除" }}
+            </button>
+          </footer>
+        </section>
+      </div>
+
+      <div
+        v-if="deleteConversationConfirmTarget"
+        class="modal-backdrop"
+        @mousedown.self="closeDeleteConversationConfirm"
+      >
+        <section
+          class="modal small-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="删除会话"
+        >
+          <header class="modal-header">
+            <div>
+              <h2>删除会话</h2>
+              <p>永久删除此会话记录。</p>
+            </div>
+            <button
+              class="icon-button"
+              type="button"
+              v-tooltip.bottom="'关闭'"
+              aria-label="关闭"
+              @click="closeDeleteConversationConfirm"
+            >
+              <X :size="19" />
+            </button>
+          </header>
+          <div class="modal-body">
+            <p class="confirm-dialog-text">
+              确定彻底删除会话 <strong>{{ deleteConversationConfirmTarget.title }}</strong> 吗？
+            </p>
+            <p class="confirm-dialog-tip">
+              ⚠️ 警告：此操作将永久清除该会话的本地聊天历史与上下文执行日志，不可恢复。
+            </p>
+          </div>
+          <footer class="modal-footer">
+            <button
+              class="button-secondary"
+              type="button"
+              :disabled="deletingConversation"
+              @click="closeDeleteConversationConfirm"
+            >
+              取消
+            </button>
+            <button
+              class="button-danger"
+              type="button"
+              :disabled="deletingConversation"
+              @click="executeDeleteConversation(deleteConversationConfirmTarget)"
+            >
+              {{ deletingConversation ? "正在删除..." : "彻底删除" }}
+            </button>
+          </footer>
+        </section>
       </div>
 
       <div
@@ -4967,5 +5287,9 @@ onBeforeUnmount(() => {
         </section>
       </div>
     </Teleport>
+    <LocalModelModal
+      v-model:open="localModelModalOpen"
+      @saved="loadHostModels(selectedModel)"
+    />
   </div>
 </template>
